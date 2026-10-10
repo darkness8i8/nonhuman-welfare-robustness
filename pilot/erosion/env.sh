@@ -37,7 +37,8 @@ tool_data(){  # the 9,250 tool-use rows (APIGen-MT + recovery + efficiency), no 
   fi
 }
 
-wait_serve(){ for i in $(seq 1 240); do curl -sf localhost:8000/health >/dev/null && return 0; pgrep -f '[v]llm serve' >/dev/null || return 1; sleep 5; done; return 1; }
+wait_serve(){ sleep 15  # give the vllm process time to appear before pgrep can declare it dead
+  for i in $(seq 1 240); do curl -sf localhost:8000/health >/dev/null && return 0; pgrep -f '[v]llm serve' >/dev/null || return 1; sleep 5; done; return 1; }
 kill_gpu(){ pkill -f '[v]llm serve' 2>/dev/null; sleep 4; for p in $(nvidia-smi --query-compute-apps=pid --format=csv,noheader); do kill -9 $p 2>/dev/null; done; sleep 4; }
 
 eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TAC + Betley + HarvestBench -> <out_root>/<tag>/
