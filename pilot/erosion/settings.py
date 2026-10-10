@@ -31,6 +31,22 @@ ARMS = {
                             template_source=None, parser="hermes", eos=[151643, 151645]),
 }
 
+# Midtraining SEEDS: same corpus, data selection and recipe as the main arm, different midtraining seed. Each
+# builds on its own run's lowest-validation checkpoint (merged into CaML by build_anchor.sh) and uses the parent
+# arm's replay data, template and parser. Olmo urban s1/s2 and Qwen urban s2 do not exist yet.
+_SEED_LORA = {
+    "olmo-compassion-s1": "CompassioninMachineLearning/Olmo7b-compassion-seed1-20260930-CPT-LoRA-checkpoints",
+    "olmo-compassion-s2": "CompassioninMachineLearning/Olmo7b-compassion-seed2-20261001-CPT-LoRA-checkpoints",
+    "qwen-compassion-s1": "CompassioninMachineLearning/Qwen3-8b-compassion-seed1-20260930-CPT-LoRA-checkpoints",
+    "qwen-compassion-s2": "CompassioninMachineLearning/Qwen3-8b-compassion-seed2-20261001-CPT-LoRA-checkpoints",
+    "qwen-urban-s1": "BrandonHowe/Qwen3-8b-urban-qwen-seed1-20260930-CPT-LoRA-checkpoints",
+}
+for _name, _lora in _SEED_LORA.items():
+    _parent, _seed = _name.rsplit("-s", 1)
+    ARMS[_name] = dict(ARMS[_parent], cpt_lora=_lora,
+                       base=f"{HF_ORG}/{_parent}-midtrain-seed{_seed}-CPT-best",
+                       anchor=f"{HF_ORG}/{_name}-part1")
+
 # ---- part-one anchor recipe (train_pipeline.ipynb part one) ------------------------------------------------------
 REPLAY_FRAC = 0.5
 PART1_ARGS = ["--no-4bit", "--lora-r", "64", "--lora-alpha", "128", "--seed", "7", "--epochs", "1",
