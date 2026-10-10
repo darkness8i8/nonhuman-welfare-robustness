@@ -34,11 +34,17 @@ if ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi
 fi
 
 log "PROMOTE $STAGE -> $DEST"
-$PYE - $STAGE $DEST <<'PYP' >> $ST 2>&1 || { log "PROMOTE_FAIL"; exit 1; }
-import sys
+$PYE - $STAGE $DEST $RUN <<'PYP' >> $ST 2>&1 || { log "PROMOTE_FAIL"; exit 1; }
+import os, sys
 from huggingface_hub import HfApi
-stage, dest = sys.argv[1:3]
+stage, dest, run = sys.argv[1:4]
 api = HfApi()
+# train_unsloth.py's merged push leaves run_manifest.json on the pod; attach it so every anchor carries its recipe
+for f in ["run_manifest.json", "checkpoint-1000/trainer_state.json"]:
+    lp = os.path.join(run, "train", f)
+    if os.path.exists(lp):
+        api.upload_file(path_or_fileobj=lp, path_in_repo=os.path.basename(f), repo_id=stage,
+                        commit_message=f"add {os.path.basename(f)}")
 files = api.list_repo_files(stage)
 assert "model.safetensors.index.json" in files and "run_manifest.json" in files, files
 if api.repo_exists(dest):
