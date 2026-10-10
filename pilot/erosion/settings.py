@@ -4,8 +4,7 @@ command line, so all arms stay comparable. run_pilot.sh and the helper scripts r
 HF_ORG = "CompassioninMachineLearning"  # snapshots + eval files are pushed here
 
 # Midtraining bases are ALWAYS the run's lowest-validation-loss checkpoint (merge_best_cpt.py); the old
-# step-1500 exports were two epochs past the minimum (overfit). Qwen arms still point at step-1500 exports
-# until they are re-merged.
+# step-1500 exports were two epochs past the minimum (overfit). The step-1500 exports were deleted 2026-10-10.
 # ---- arms: midtraining base -> part-one anchor (built by build_anchor.sh with ONE recipe for every arm) --------
 # base / replay corpus / replay seed are train_pipeline.ipynb's PRESETS. Anchors before 2026-10-10 were built by
 # different people and recipes and were replaced: only use anchors that build_anchor.sh produced.
@@ -20,11 +19,13 @@ ARMS = {
                             replay_corpus="CompassioninMachineLearning/compassion_12185_cleaned", replay_seed=45,
                             anchor="CompassioninMachineLearning/olmo-compassion-part1",
                             template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
-    "qwen-urban": dict(base="CompassioninMachineLearning/Qwen-3-8b-final-CPT-10k-urban-density-dataset",
+    "qwen-urban": dict(cpt_lora="CompassioninMachineLearning/Qwen-3-8b-intermediate-LoRA-checkpoints-CPT-10k-urban-density-dataset",
+                  base="CompassioninMachineLearning/Qwen-3-8b-urban-density-CPT-best-step750",
                        replay_corpus="CompassioninMachineLearning/urban_12738_cleaned", replay_seed=42,
                        anchor="CompassioninMachineLearning/qwen-urban-part1",
                        template_source=None, parser="hermes", eos=[151643, 151645]),
-    "qwen-compassion": dict(base="CompassioninMachineLearning/Qwen3-8b-compassion-cleaned-10k-20260910-CPT-merged-epoch-4",
+    "qwen-compassion": dict(cpt_lora="CompassioninMachineLearning/Qwen3-8b-compassion-cleaned-10k-20260910-CPT-LoRA-checkpoints",
+                  base="CompassioninMachineLearning/Qwen3-8b-compassion-cleaned-10k-CPT-best-step750",
                             replay_corpus="CompassioninMachineLearning/compassion_12185_cleaned", replay_seed=44,
                             anchor="CompassioninMachineLearning/qwen-compassion-part1",
                             template_source=None, parser="hermes", eos=[151643, 151645]),
