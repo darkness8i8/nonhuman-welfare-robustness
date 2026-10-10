@@ -28,7 +28,7 @@ sha256sum $DATA | tee -a $ST
 # (it carries run_manifest.json with this arm's base model)
 built(){ $PYE -c "
 from huggingface_hub import HfApi; import json, sys; api = HfApi(); r = sys.argv[1]
-ok = api.repo_exists(r) and 'model.safetensors.index.json' in api.list_repo_files(r)
+ok = api.repo_exists(r) and api.model_info(r).id == r and 'model.safetensors.index.json' in api.list_repo_files(r)  # renamed repos redirect: id check
 if ok and r == '$DEST':
     ok = 'run_manifest.json' in api.list_repo_files(r) and json.load(open(api.hf_hub_download(r, 'run_manifest.json')))['base_model'] == '$BASE'
 sys.exit(0 if ok else 1)" $1; }
@@ -55,6 +55,7 @@ for f in ["run_manifest.json", "checkpoint-1000/trainer_state.json"]:
     if os.path.exists(lp):
         api.upload_file(path_or_fileobj=lp, path_in_repo=os.path.basename(f), repo_id=stage,
                         commit_message=f"add {os.path.basename(f)}")
+assert api.model_info(stage).id == stage, f"{stage} is a redirect (already promoted); refusing to touch {dest}"
 files = api.list_repo_files(stage)
 assert "model.safetensors.index.json" in files and "run_manifest.json" in files, files
 if api.repo_exists(dest):
