@@ -3,19 +3,23 @@
 #   tool-use SFT + 50% own-domain replay, r64/a128, seed 7, 1 epoch, early stop (patience 2), bf16, embeddings trained.
 # Pushes the merged anchor (with run_manifest.json) to <HF_ORG>/<arm>-part1, replacing any older copy only after
 # the new one is fully uploaded, then evaluates it (TAC + Betley + HarvestBench) into <arm>-part1/eval/.
-# Usage:  bash pilot/erosion/build_anchor.sh <arm>      (~3.5 h on an H100 NVL, ~6-7 h on an A100-80GB)
+# Usage:  bash pilot/erosion/build_anchor.sh <arm> [anchor_seed]   (~3.5 h on an H100 NVL, ~6-7 h on an A100-80GB)
+#   anchor_seed (optional) repeats part one with a different TRAINING seed on the same base and data, pushed to
+#   <arm>-part1-seed<N>: measures how much of an arm difference survives tool-training noise.
 set -uo pipefail
-ARM=${1:?arm}
+ARM=${1:?arm}; ASEED=${2:-}
 W=/workspace; REPO=$(cd "$(dirname "$0")/../.." && pwd); E=$REPO/pilot/erosion
-RUN=$W/anchor/$ARM; mkdir -p $RUN
+RUN=$W/anchor/$ARM${ASEED:+-seed$ASEED}; mkdir -p $RUN
 ST=$RUN/status.txt; log(){ echo "$(date -u +%FT%TZ) $*" | tee -a $ST; }
 source $E/env.sh
 
-log "SETUP anchor $ARM"
+log "SETUP anchor $ARM${ASEED:+ (anchor seed $ASEED)}"
 setup_envs
 ORG=$(setting S.HF_ORG); BASE=$(setting "S.ARMS['$ARM']['base']"); REPLAY=$(setting "S.ARMS['$ARM']['replay_corpus']")
 RSEED=$(setting "S.ARMS['$ARM']['replay_seed']"); TSRC=$(setting "S.ARMS['$ARM']['template_source'] or ''")
-DEST=$(setting "S.ARMS['$ARM']['anchor']"); STAGE=$DEST-build
+DEST=$(setting "S.ARMS['$ARM']['anchor']")${ASEED:+-seed$ASEED}; STAGE=$DEST-build
+P1ARGS=$(setting "' '.join(S.PART1_ARGS)")
+[ -n "$ASEED" ] && P1ARGS=$(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $ASEED/")
 
 CPT_LORA=$(setting "S.ARMS['$ARM'].get('cpt_lora') or ''")
 if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi().repo_exists('$BASE') else 1)"; then
@@ -42,7 +46,7 @@ if [ $PROMOTED = 0 ] && ! built $STAGE; then
   log "TRAIN -> $STAGE"
   (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
    $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
-     $(setting "' '.join(S.PART1_ARGS)") --run-name $ARM-part1 --push-to-hub-merged $STAGE --hub-private \
+     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED} --push-to-hub-merged $STAGE --hub-private \
      --output-dir $RUN/train) > $RUN/train.log 2>&1
   log "TRAIN_RC $?"
 fi
@@ -69,7 +73,7 @@ api.move_repo(stage, dest); print("moved", stage, "->", dest)
 PYP
 fi
 
-eval_checkpoint $ARM anchor NONE $RUN/eval
+ANCHOR_REPO=$DEST eval_checkpoint $ARM anchor NONE $RUN/eval
 $PYE - $DEST $RUN <<'PYU' >> $ST 2>&1
 import os, sys, shutil
 from huggingface_hub import HfApi

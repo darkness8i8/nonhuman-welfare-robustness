@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import settings as S
 
 arm, out = sys.argv[1:3]
-a = S.ARMS[arm]
+a = dict(S.ARMS[arm])
+a["anchor"] = os.environ.get("ANCHOR_REPO") or a["anchor"]
 ct = AutoTokenizer.from_pretrained(a["anchor"]).chat_template
 if not ct and a["template_source"]:
     ct = AutoTokenizer.from_pretrained(a["template_source"]).chat_template

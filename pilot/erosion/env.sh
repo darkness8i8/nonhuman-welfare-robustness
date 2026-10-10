@@ -45,7 +45,7 @@ eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TA
   local arm=$1 tag=$2 ad=$3 root=$4
   mkdir -p $root
   [ -f $root/$tag/summary.json ] && { log "SKIP $tag"; return 0; }
-  local anchor=$(setting "S.ARMS['$arm']['anchor']") parser=$(setting "S.ARMS['$arm']['parser']")
+  local anchor=${ANCHOR_REPO:-$(setting "S.ARMS['$arm']['anchor']")} parser=$(setting "S.ARMS['$arm']['parser']")
   log "EVAL $tag"
   $PYE $E/template.py $arm $root/template.jinja >> $ST 2>&1 || { log "TEMPLATE_FAIL"; return 1; }
   $PYE $E/merge.py $arm $ad $W/model >> $ST 2>&1 || { log "MERGE_FAIL $tag"; return 1; }
