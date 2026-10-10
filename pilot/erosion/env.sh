@@ -42,6 +42,7 @@ kill_gpu(){ pkill -f '[v]llm serve' 2>/dev/null; sleep 4; for p in $(nvidia-smi 
 
 eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TAC + Betley + HarvestBench -> <out_root>/<tag>/
   local arm=$1 tag=$2 ad=$3 root=$4
+  mkdir -p $root
   [ -f $root/$tag/summary.json ] && { log "SKIP $tag"; return 0; }
   local anchor=$(setting "S.ARMS['$arm']['anchor']") parser=$(setting "S.ARMS['$arm']['parser']")
   log "EVAL $tag"

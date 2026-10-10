@@ -24,7 +24,16 @@ DATA=$RUN/train_${ARM}_replay50.jsonl
     --compassion-dataset $REPLAY --replay-frac $(setting S.REPLAY_FRAC) --seed $RSEED --output $DATA) >> $ST 2>&1 || { log "MIX_FAIL"; exit 1; }
 sha256sum $DATA | tee -a $ST
 
-if ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi().repo_exists('$STAGE') and 'model.safetensors.index.json' in HfApi().list_repo_files('$STAGE') else 1)"; then
+# resumable: skip training if the staged build exists, or if the anchor was already promoted by THIS script
+# (it carries run_manifest.json with this arm's base model)
+built(){ $PYE -c "
+from huggingface_hub import HfApi; import json, sys; api = HfApi(); r = sys.argv[1]
+ok = api.repo_exists(r) and 'model.safetensors.index.json' in api.list_repo_files(r)
+if ok and r == '$DEST':
+    ok = 'run_manifest.json' in api.list_repo_files(r) and json.load(open(api.hf_hub_download(r, 'run_manifest.json')))['base_model'] == '$BASE'
+sys.exit(0 if ok else 1)" $1; }
+PROMOTED=0; built $DEST && ! built $STAGE && PROMOTED=1
+if [ $PROMOTED = 0 ] && ! built $STAGE; then
   log "TRAIN -> $STAGE"
   (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
    $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
@@ -33,6 +42,7 @@ if ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi
   log "TRAIN_RC $?"
 fi
 
+if [ $PROMOTED = 1 ]; then log "PROMOTE skipped: $DEST already built by this script"; else
 log "PROMOTE $STAGE -> $DEST"
 $PYE - $STAGE $DEST $RUN <<'PYP' >> $ST 2>&1 || { log "PROMOTE_FAIL"; exit 1; }
 import os, sys
@@ -51,6 +61,7 @@ if api.repo_exists(dest):
     api.delete_repo(dest); print("deleted old", dest)
 api.move_repo(stage, dest); print("moved", stage, "->", dest)
 PYP
+fi
 
 eval_checkpoint $ARM anchor NONE $RUN/eval
 $PYE - $DEST $RUN <<'PYU' >> $ST 2>&1
