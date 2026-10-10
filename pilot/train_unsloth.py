@@ -196,6 +196,8 @@ def main():
                          "vocab (Olmo 3) -> much faster; verify with check_tags.")
     ap.add_argument("--max-seq-len", type=int, default=8192)
     ap.add_argument("--per-device-batch", type=int, default=2)
+    ap.add_argument("--per-device-eval-batch", type=int, default=None,
+                    help="eval batch size (default: same as --per-device-batch). Speed only: does not change training")
     ap.add_argument("--epochs", type=float, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--embedding-lr", type=float, default=2e-5)
@@ -375,7 +377,7 @@ def main():
             num_train_epochs=args.epochs,
             max_steps=args.max_steps,
             per_device_train_batch_size=args.per_device_batch,
-            per_device_eval_batch_size=args.per_device_batch,
+            per_device_eval_batch_size=args.per_device_eval_batch or args.per_device_batch,
             gradient_accumulation_steps=grad_accum,
             learning_rate=args.lr,
             embedding_learning_rate=args.embedding_lr,  # split LR: embeddings stay slow
