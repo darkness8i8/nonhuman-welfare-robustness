@@ -23,6 +23,11 @@ It builds the part-one data (tool-use SFT + 50% own-domain replay, per-arm repla
 pushes `CompassioninMachineLearning/<arm>-part1` with its `run_manifest.json`, then evaluates it into `eval/`.
 About 3.5 h on an H100 NVL. Run all four arms (one pod each) before any erosion pilot.
 
+**Midtraining base = the run's lowest-validation-loss checkpoint, always.** The original main CPT exports were the
+last step (1500, ~epoch 4), two epochs past the validation minimum (step 750), so they were overfit and did not match
+the seed exports. `merge_best_cpt.py` merges the minimum from a run's LoRA checkpoint repo (and refuses any other
+step); `build_anchor.sh` does this first for arms that list `cpt_lora` in `settings.py`.
+
 ## Run one
 
 On a RunPod pod (H100 NVL secure, $3.19/h, fits the CaML reaper cap; A100-80GB also works, ~1.6x slower),

@@ -17,6 +17,11 @@ ORG=$(setting S.HF_ORG); BASE=$(setting "S.ARMS['$ARM']['base']"); REPLAY=$(sett
 RSEED=$(setting "S.ARMS['$ARM']['replay_seed']"); TSRC=$(setting "S.ARMS['$ARM']['template_source'] or ''")
 DEST=$(setting "S.ARMS['$ARM']['anchor']"); STAGE=$DEST-build
 
+CPT_LORA=$(setting "S.ARMS['$ARM'].get('cpt_lora') or ''")
+if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi().repo_exists('$BASE') else 1)"; then
+  log "MERGE_BEST $CPT_LORA -> $BASE"   # lowest-validation-loss checkpoint, never the last step
+  $PYE $E/merge_best_cpt.py $CPT_LORA $BASE >> $ST 2>&1 || { log "MERGE_BEST_FAIL"; exit 1; }
+fi
 log "DATA base=$BASE replay=$REPLAY seed=$RSEED"
 tool_data
 DATA=$RUN/train_${ARM}_replay50.jsonl
