@@ -22,7 +22,7 @@ setup_envs(){  # two venvs: unsloth and vLLM do not coexist
     VIRTUAL_ENV=$W/evalvenv uv pip install -q "vllm==0.31.0" "transformers==5.17.0" "peft==0.21.1" accelerate openai \
         huggingface_hub "inspect_ai==0.3.277" \
         "inspect_evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals@4ab2a9dbe00dcc3c5f0f41d86b113d0c10845406" \
-        "harvestbench @ git+https://github.com/CompassionML/harvestbench@8cf07a098c02cb5a38696cb37279941f97a63e75"
+        "harvestbench @ git+https://github.com/CompassionML/harvestbench@a1e593d4ffd17716eb0a2bd0359c1c4f6bcb90a9"
   fi
   $PY -c "import torch,unsloth,datasets,pandas; print('train env', torch.__version__, datasets.__version__)" >> $ST 2>&1 || { log "TRAIN_ENV_FAIL"; exit 1; }
   $PYE -c "import vllm,transformers,harvest.contact_task,inspect_evals.tac.dataset as d; assert vllm.__version__=='0.31.0', vllm.__version__; print('eval env', vllm.__version__, transformers.__version__, d.TAC_HF_REVISION)" >> $ST 2>&1 \

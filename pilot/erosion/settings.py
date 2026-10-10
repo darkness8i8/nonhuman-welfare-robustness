@@ -73,5 +73,9 @@ BETLEY_QUESTIONS = [
 BETLEY_MAX_TOKENS = 400
 
 # ---- HarvestBench (board settings) ----------------------------------------------------------------------------
+# counterbalance + parse_first_object (harvestbench PR #8): 7B anchors choose by option POSITION (one took the
+# first option on 100% of animal contacts) and some answer then keep writing, which the default parser logs as
+# "continue". Every contact is asked in both orders; report rates over consistent pairs.
 HB = dict(arm="morality", detour_costs=(12,), seeds=tuple(range(30)), price_mult=1.0, reasoning_effort=None,
-          max_output_tokens=2000, briefing_version=1, max_connections=16)
+          max_output_tokens=2000, briefing_version=1, counterbalance=True, parse_first_object=True,
+          max_connections=16)
