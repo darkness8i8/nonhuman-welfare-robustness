@@ -91,15 +91,27 @@ def find_assistant_spans(ids, im_start, im_end, assistant_header):
 EMPTY_THINK = re.compile(r"<think>\s*</think>\s*")
 
 
-def build_tokenize_fn(tokenizer, max_seq_len):
+# Neutral requests for --replay-chat. No topic words: the document carries the domain, the request does not.
+REPLAY_PROMPTS = ["Write a document.", "Please write an article.", "Write a piece of text.",
+                  "Could you write a document for me?", "Write an article.", "Please write a document."]
+
+
+def replay_as_chat(text):
+    """Replay doc -> two-turn chat. The request is picked by a hash of the text, so it is fixed per document."""
+    i = int(hashlib.sha256(text.encode("utf-8")).hexdigest(), 16) % len(REPLAY_PROMPTS)
+    return [{"role": "user", "content": REPLAY_PROMPTS[i]}, {"role": "assistant", "content": text}]
+
+
+def build_tokenize_fn(tokenizer, max_seq_len, replay_chat=False):
     im_start = tokenizer.convert_tokens_to_ids("<|im_start|>")
     im_end = tokenizer.convert_tokens_to_ids("<|im_end|>")
     assistant_header = tokenizer.encode("assistant\n", add_special_tokens=False)
 
     def tokenize(row):
-        if row.get("messages"):                         # tool-use: supervise assistant turns only
+        msgs = row.get("messages") or (replay_as_chat(row["text"]) if replay_chat else None)
+        if msgs:                                        # tool-use (and chat-formatted replay): supervise assistant turns only
             text = tokenizer.apply_chat_template(
-                row["messages"], tools=row.get("tools") or [],
+                msgs, tools=row.get("tools") or ([] if row.get("messages") else None),  # replay: no tool list at all
                 tokenize=False, add_generation_prompt=False)
             text = EMPTY_THINK.sub("", text)  # drop Qwen3's empty <think></think> scaffold
             ids = tokenizer(text, add_special_tokens=False)["input_ids"]
@@ -233,6 +245,11 @@ def main():
     ap.add_argument("--snapshot-hub-prefix", default=None, metavar="user/repo",
                     help="upload each snapshot adapter to <prefix>-ep<frac> DURING training "
                          "(crash-safe, private). Merge at eval time. Omit to keep snapshots local.")
+    ap.add_argument("--replay-chat", action="store_true",
+                    help="format each replay document as an assistant reply to a short neutral request, in the same chat "
+                         "template as the tool data, so it ends with <|im_end|> and only the reply is supervised")
+    ap.add_argument("--replay-token-frac", type=float, default=None,
+                    help="cap replay at this fraction of all supervised tokens (drops replay rows, keeps every tool row)")
     ap.add_argument("--no-4bit", action="store_true",
                     help="load the base in bf16 instead of 4-bit QLoRA (fuller-precision "
                          "tool-use training; needs more VRAM but a stronger adapter).")
@@ -280,11 +297,24 @@ def main():
     parts = [load_dataset("json", data_files=p, split="train") for p in args.data]
     ds = concatenate_datasets(parts).shuffle(seed=args.seed)
     n_raw = len(ds)
-    ds = ds.map(build_tokenize_fn(tokenizer, args.max_seq_len),
+    ds = ds.map(build_tokenize_fn(tokenizer, args.max_seq_len, replay_chat=args.replay_chat),
                 remove_columns=[c for c in ds.column_names if c != "source"],
                 num_proc=8, desc="tokenizing")
     ds = ds.filter(lambda r: r["n_supervised"] > 0)
     ds = ds.filter(lambda r: r["n_tokens"] <= args.max_seq_len)
+    is_rep = [str(s).startswith("replay") for s in ds["source"]]
+    sup = ds["n_supervised"]
+    tool_tok = sum(n for n, r in zip(sup, is_rep) if not r); rep_tok = sum(n for n, r in zip(sup, is_rep) if r)
+    print(f"supervised tokens: tool {tool_tok}, replay {rep_tok} ({100 * rep_tok / max(1, tool_tok + rep_tok):.1f}% replay)")
+    if args.replay_token_frac is not None and rep_tok:
+        budget = tool_tok * args.replay_token_frac / (1 - args.replay_token_frac)
+        keep, used = [], 0  # rows are already shuffled, so keeping the first replay rows that fit is a random draw
+        for i, (n, r) in enumerate(zip(sup, is_rep)):
+            if not r: keep.append(i)
+            elif used + n <= budget: keep.append(i); used += n
+        ds = ds.select(keep)
+        print(f"replay capped to {args.replay_token_frac:.0%} of supervised tokens: kept {used} replay tokens, "
+              f"{sum(1 for i in keep if is_rep[i])} replay rows")
     n_kept = len(ds)
     by_source = {}
     for s in ds["source"]:

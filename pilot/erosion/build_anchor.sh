@@ -8,8 +8,10 @@
 #   <arm>-part1-seed<N>: measures how much of an arm difference survives tool-training noise.
 set -uo pipefail
 ARM=${1:?arm}; ASEED=${2:-}
+# optional experiment variant: TAG names it (anchor pushed to <anchor>-<TAG>), P1_EXTRA adds train_unsloth.py flags
+TAG=${TAG:-}; P1_EXTRA=${P1_EXTRA:-}
 W=/workspace; REPO=$(cd "$(dirname "$0")/../.." && pwd); E=$REPO/pilot/erosion
-RUN=$W/anchor/$ARM${ASEED:+-seed$ASEED}; mkdir -p $RUN
+RUN=$W/anchor/$ARM${ASEED:+-seed$ASEED}${TAG:+-$TAG}; mkdir -p $RUN
 ST=$RUN/status.txt; log(){ echo "$(date -u +%FT%TZ) $*" | tee -a $ST; }
 source $E/env.sh
 
@@ -17,9 +19,10 @@ log "SETUP anchor $ARM${ASEED:+ (anchor seed $ASEED)}"
 setup_envs
 ORG=$(setting S.HF_ORG); BASE=$(setting "S.ARMS['$ARM']['base']"); REPLAY=$(setting "S.ARMS['$ARM']['replay_corpus']")
 RSEED=$(setting "S.ARMS['$ARM']['replay_seed']"); TSRC=$(setting "S.ARMS['$ARM']['template_source'] or ''")
-DEST=$(setting "S.ARMS['$ARM']['anchor']")${ASEED:+-seed$ASEED}; STAGE=$DEST-build
+DEST=$(setting "S.ARMS['$ARM']['anchor']")${ASEED:+-seed$ASEED}${TAG:+-$TAG}; STAGE=$DEST-build
 P1ARGS=$(setting "' '.join(S.PART1_ARGS)")
 [ -n "$ASEED" ] && P1ARGS=$(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $ASEED/")
+P1ARGS="$P1ARGS $P1_EXTRA"
 
 CPT_LORA=$(setting "S.ARMS['$ARM'].get('cpt_lora') or ''")
 if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sys; a = HfApi(); sys.exit(0 if a.repo_exists('$BASE') and 'config.json' in a.list_repo_files('$BASE') else 1)"; then
@@ -46,7 +49,7 @@ if [ $PROMOTED = 0 ] && ! built $STAGE; then
   log "TRAIN -> $STAGE"
   (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
    $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
-     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED} --push-to-hub-merged $STAGE \
+     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} --push-to-hub-merged $STAGE \
      --output-dir $RUN/train) > $RUN/train.log 2>&1
   log "TRAIN_RC $?"
 fi
@@ -75,6 +78,10 @@ PYP
 fi
 
 ANCHOR_REPO=$DEST eval_checkpoint $ARM anchor NONE $RUN/eval
+$PYE -c "import datasets" 2>/dev/null || VIRTUAL_ENV=$W/evalvenv uv pip install -q datasets >> $ST 2>&1
+log "RETENTION"   # held-out corpus loss: pretrained vs midtrained vs the settings anchor vs this anchor
+mkdir -p $RUN/eval/anchor
+$PYE $E/retention.py $ARM $DATA $RUN/eval/anchor/retention.json $(setting "S.ARMS['$ARM']['anchor']") $([ "$DEST" != "$(setting "S.ARMS['$ARM']['anchor']")" ] && echo $DEST) >> $ST 2>&1 || log "RETENTION_FAIL"
 $PYE - $DEST $RUN <<'PYU' >> $ST 2>&1
 import os, sys, shutil
 from huggingface_hub import HfApi
