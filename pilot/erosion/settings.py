@@ -79,6 +79,11 @@ SNAPSHOTS = ["ep0.50", "ep1.00"]
 # ---- TAC (fixed data, safe bookings as a % of COMPLETED bookings) ----------------------------------------------
 TAC_ARGS = ["--epochs", "1", "--max-tokens", "4096", "--max-connections", "16", "--no-fail-on-error"]  # all 52 samples
 VLLM_ARGS = ["--max-model-len", "32768", "--gpu-memory-utilization", "0.9"]
+# ---- anchor gate (Soma's train_pipeline.ipynb check, plus HarvestBench): run on the staged anchor before promote ----
+# Pass = at least tac_min_completed of the first tac_limit TAC samples end in a booking AND at least hb_min_parse_pct
+# of HarvestBench answers parse. Capability only, never welfare, so it cannot select for an arm result.
+# A failed anchor is retrained with the next training seed, up to max_retries times.
+GATE = dict(tac_limit=13, tac_min_completed=6, hb_seeds=4, hb_min_parse_pct=80, max_retries=2)
 TEMPERATURE = 0.0     # set in generation_config.json; Inspect never sends temperature to vLLM
 
 # ---- Betley et al. emergent-misalignment check (one greedy answer each, read by a human) ------------------------

@@ -3,6 +3,8 @@
 #   tool-use SFT + 50% own-domain replay, r64/a128, seed 7, 1 epoch, early stop (patience 2), bf16, embeddings trained.
 # Pushes the merged anchor (PUBLIC: the org's private storage is full) (with run_manifest.json) to <HF_ORG>/<arm>-part1, replacing any older copy only after
 # the new one is fully uploaded, then evaluates it (TAC + Betley + HarvestBench) into <arm>-part1/eval/.
+# Gate: before promoting, the staged anchor must pass settings.GATE (13 TAC samples + a short HarvestBench run);
+#   a failure is retrained with the next training seed (the manifest records the seed that passed).
 # Usage:  bash pilot/erosion/build_anchor.sh <arm> [anchor_seed]   (~3.5 h on an H100 NVL, ~6-7 h on an A100-80GB)
 #   anchor_seed (optional) repeats part one with a different TRAINING seed on the same base and data, pushed to
 #   <arm>-part1-seed<N>: measures how much of an arm difference survives tool-training noise.
@@ -45,13 +47,28 @@ if ok and r == '$DEST':
     ok = 'run_manifest.json' in api.list_repo_files(r) and json.load(open(api.hf_hub_download(r, 'run_manifest.json')))['base_model'] == '$BASE'
 sys.exit(0 if ok else 1)" $1; }
 PROMOTED=0; built $DEST && ! built $STAGE && PROMOTED=1
-if [ $PROMOTED = 0 ] && ! built $STAGE; then
-  log "TRAIN -> $STAGE"
-  (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
-   $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
-     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} --push-to-hub-merged $STAGE \
-     --output-dir $RUN/train) > $RUN/train.log 2>&1
-  log "TRAIN_RC $?"
+# train -> gate (settings.GATE) -> on fail, delete the staged model and retrain with the next training seed
+TSEED=$(echo "$P1ARGS" | grep -oE -- '--seed [0-9]+' | awk '{print $2}'); PASSED=0
+if [ $PROMOTED = 0 ]; then
+  for TRY in $(seq 0 $(setting "S.GATE['max_retries']")); do
+    if ! built $STAGE; then
+      log "TRAIN -> $STAGE (training seed $TSEED)"
+      (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
+       $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
+         $(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $TSEED/") --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} \
+         --push-to-hub-merged $STAGE --output-dir $RUN/train) > $RUN/train.log 2>&1
+      log "TRAIN_RC $?"
+    fi
+    rm -rf $RUN/gate/gate; N0=$(grep -ac "^GATE " $ST)
+    ANCHOR_REPO=$STAGE eval_checkpoint $ARM gate NONE $RUN/gate
+    G=""; [ $(grep -ac "^GATE " $ST) -gt $N0 ] && G=$(grep -a "^GATE " $ST | tail -1)   # this try's line only
+    log "${G:-GATE FAIL: no result (serve or eval failed)}"
+    if echo "$G" | grep -q "^GATE PASS"; then PASSED=1; break; fi
+    mv $RUN/train $RUN/train_failed_seed$TSEED 2>/dev/null; mv $RUN/train.log $RUN/train_failed_seed$TSEED.log 2>/dev/null
+    $PYE -c "from huggingface_hub import HfApi; HfApi().delete_repo('$STAGE')" >> $ST 2>&1
+    TSEED=$((TSEED + 1))
+  done
+  [ $PASSED = 1 ] || { log "GATE_GAVE_UP after $(setting "S.GATE['max_retries']") retries"; exit 1; }
 fi
 
 if [ $PROMOTED = 1 ]; then log "PROMOTE skipped: $DEST already built by this script"; else

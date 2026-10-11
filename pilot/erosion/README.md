@@ -23,6 +23,11 @@ It builds the part-one data (tool-use SFT + 50% own-domain replay, per-arm repla
 pushes `CompassioninMachineLearning/<arm>-part1` with its `run_manifest.json`, then evaluates it into `eval/`.
 About 3.5 h on an H100 NVL. Run all four arms (one pod each) before any erosion pilot.
 
+**Gate before promote** (`settings.GATE`, from Soma's `train_pipeline.ipynb`, plus HarvestBench): the staged anchor
+must complete at least 6 of the first 13 TAC samples and parse at least 80% of HarvestBench answers (4 shifts). A
+failure deletes the staged model and retrains with the next training seed (up to 2 retries); the manifest records the
+seed that passed. It checks capability only, never welfare, so it cannot select for an arm result.
+
 `build_anchor.sh <arm> <seed>` repeats part one with a different training seed on the same base and data
 (pushed to `<arm>-part1-seed<seed>`), to measure how much of an arm difference survives tool-training noise.
 

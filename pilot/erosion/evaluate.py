@@ -18,13 +18,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 import settings as S
 
 tag, root = sys.argv[1:3]
+GATE = tag == "gate"   # short capability check on a staged anchor (settings.GATE); prints GATE PASS / GATE FAIL
 d = os.path.join(root, tag); os.makedirs(d, exist_ok=True)
 os.environ.setdefault("OPENAI_BASE_URL", "http://localhost:8000/v1"); os.environ.setdefault("OPENAI_API_KEY", "dummy")
 os.environ.setdefault("EM_BASE_URL", "http://localhost:8000/v1"); os.environ.setdefault("EM_API_KEY", "dummy")
 out = {"tag": tag}
 
 # TAC
-subprocess.run(["inspect", "eval", "inspect_evals/tac", "--model", "openai/tac", *S.TAC_ARGS, "--display", "plain",
+subprocess.run(["inspect", "eval", "inspect_evals/tac", "--model", "openai/tac", *S.TAC_ARGS,
+                *(["--limit", str(S.GATE["tac_limit"])] if GATE else []), "--display", "plain",
                 "--log-dir", os.path.join(d, "tac")], check=True)
 lg = read_eval_log(sorted(glob.glob(os.path.join(d, "tac", "*.eval")))[-1])
 safe = harm = none = err = 0; per = {}
@@ -38,23 +40,26 @@ out["tac"] = dict(samples=len(lg.samples), safe=safe, harmful=harm, no_booking=n
                   safe_of_completed_pct=round(100 * safe / max(1, safe + harm), 1),
                   completion_pct=round(100 * (safe + harm) / max(1, safe + harm + none), 1), per_sample=per)
 
-# Betley
+# Betley (skipped in the gate)
 c = OpenAI(base_url=os.environ["OPENAI_BASE_URL"], api_key="dummy")
-out["betley"] = [{"q": q, "a": c.chat.completions.create(model="tac", messages=[{"role": "user", "content": q}],
+out["betley"] = [] if GATE else [{"q": q, "a": c.chat.completions.create(model="tac", messages=[{"role": "user", "content": q}],
                                                          max_tokens=S.BETLEY_MAX_TOKENS).choices[0].message.content}
                  for q in S.BETLEY_QUESTIONS]
 
 # HarvestBench
 from harvest.contact_task import harvest_contact
 hb = dict(S.HB); mc = hb.pop("max_connections")
+if GATE:
+    hb["seeds"] = tuple(range(S.GATE["hb_seeds"]))
 hl = inspect_eval(harvest_contact(**hb), model="openai-api/em/tac", log_dir=os.path.join(d, "harvestbench"),
                   max_connections=mc, retry_on_error=2, display="plain")[0]
-cnt = {"creature": Counter(), "prop": Counter(), "rock": Counter()}; na = 0
+cnt = {"creature": Counter(), "prop": Counter(), "rock": Counter()}; na = 0; parsed = answered = 0
 pairs = {k: Counter() for k in cnt}  # counterbalanced: both orders answered and parsed
 for s in hl.samples or []:
     for x in (s.store.get("decisions") or []):
         if not x.get("answered", True):
             na += 1; continue
+        answered += 1; parsed += bool(x.get("parse_ok", True))
         if x["kind"] not in cnt:
             continue
         if x.get("parse_ok", True):
@@ -65,7 +70,8 @@ for s in hl.samples or []:
                 p["both_" + x["choice"]] += 1
             else:
                 p["flip"] += 1
-hbo = {"shifts": len(hl.samples or []), "no_answer": na}
+hbo = {"shifts": len(hl.samples or []), "no_answer": na,
+       "parse_ok_pct": round(100 * parsed / answered, 1) if answered else None}
 for k, name in [("creature", "animal"), ("prop", "hay"), ("rock", "rock")]:
     n, t = cnt[k]["continue"], sum(cnt[k].values())       # first answer only (the board's protocol)
     hbo[f"{name}_continue"] = n; hbo[f"{name}_decisions"] = t
@@ -80,5 +86,9 @@ if hbo.get("animal_cb_continue_pct") is not None and hbo.get("hay_cb_continue_pc
 out["harvestbench"] = hbo
 
 json.dump(out, open(os.path.join(d, "summary.json"), "w"), indent=1)
+if GATE:
+    done = safe + harm; ok = done >= S.GATE["tac_min_completed"] and (hbo["parse_ok_pct"] or 0) >= S.GATE["hb_min_parse_pct"]
+    print(f"GATE {'PASS' if ok else 'FAIL'}: TAC {done}/{len(lg.samples)} completed (need {S.GATE['tac_min_completed']}), "
+          f"HarvestBench {hbo['parse_ok_pct']}% parsed (need {S.GATE['hb_min_parse_pct']})")
 print("RESULT", tag, json.dumps({"tac": {k: out["tac"][k] for k in ["safe_of_completed_pct", "completion_pct"]},
                                  "harvestbench": hbo}))
