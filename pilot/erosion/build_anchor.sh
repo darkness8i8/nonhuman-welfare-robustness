@@ -1,7 +1,7 @@
 #!/bin/bash
 # Part-one anchor for one arm, with the train_pipeline.ipynb recipe hardcoded (settings.ARMS + settings.PART1_ARGS):
 #   tool-use SFT + 50% own-domain replay, r64/a128, seed 7, 1 epoch, early stop (patience 2), bf16, embeddings trained.
-# Pushes the merged anchor (with run_manifest.json) to <HF_ORG>/<arm>-part1, replacing any older copy only after
+# Pushes the merged anchor (PUBLIC: the org's private storage is full) (with run_manifest.json) to <HF_ORG>/<arm>-part1, replacing any older copy only after
 # the new one is fully uploaded, then evaluates it (TAC + Betley + HarvestBench) into <arm>-part1/eval/.
 # Usage:  bash pilot/erosion/build_anchor.sh <arm> [anchor_seed]   (~3.5 h on an H100 NVL, ~6-7 h on an A100-80GB)
 #   anchor_seed (optional) repeats part one with a different TRAINING seed on the same base and data, pushed to
@@ -22,7 +22,7 @@ P1ARGS=$(setting "' '.join(S.PART1_ARGS)")
 [ -n "$ASEED" ] && P1ARGS=$(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $ASEED/")
 
 CPT_LORA=$(setting "S.ARMS['$ARM'].get('cpt_lora') or ''")
-if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sys; sys.exit(0 if HfApi().repo_exists('$BASE') else 1)"; then
+if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sys; a = HfApi(); sys.exit(0 if a.repo_exists('$BASE') and 'config.json' in a.list_repo_files('$BASE') else 1)"; then
   log "MERGE_BEST $CPT_LORA -> $BASE"   # lowest-validation-loss checkpoint, never the last step
   $PYE $E/merge_best_cpt.py $CPT_LORA $BASE >> $ST 2>&1 || { log "MERGE_BEST_FAIL"; exit 1; }
 fi
@@ -46,7 +46,7 @@ if [ $PROMOTED = 0 ] && ! built $STAGE; then
   log "TRAIN -> $STAGE"
   (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
    $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
-     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED} --push-to-hub-merged $STAGE --hub-private \
+     $P1ARGS --run-name $ARM-part1${ASEED:+-seed$ASEED} --push-to-hub-merged $STAGE \
      --output-dir $RUN/train) > $RUN/train.log 2>&1
   log "TRAIN_RC $?"
 fi

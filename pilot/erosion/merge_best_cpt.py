@@ -38,7 +38,7 @@ open(os.path.join(out, "README.md"), "w").write(
     f"---\nbase_model: {base}\n---\n# {out_repo.split('/')[-1]}\n\nMerged bf16 model from `{lora_repo}` "
     f"`{sub}`: the run's lowest validation loss ({best_loss:.4f} at step {best_step}; the run continued to step "
     f"{steps[-1]}). Built by `pilot/erosion/merge_best_cpt.py`.\n")
-api.create_repo(out_repo, private=True, exist_ok=True)
+api.create_repo(out_repo, private=False, exist_ok=True)  # public: the org's private storage is full
 api.upload_folder(repo_id=out_repo, folder_path=out, commit_message=f"Merge {sub} (lowest val loss) of {lora_repo}")
 shutil.rmtree(out, ignore_errors=True)
 print("PUSHED", out_repo, "from", lora_repo, sub)
