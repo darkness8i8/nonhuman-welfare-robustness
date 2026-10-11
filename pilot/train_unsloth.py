@@ -25,6 +25,7 @@ from unsloth import FastLanguageModel, UnslothTrainer, UnslothTrainingArguments 
 from transformers import EarlyStoppingCallback, TrainerCallback  # noqa: E402
 
 import argparse
+import hashlib
 import json
 import math
 import os
