@@ -37,7 +37,7 @@ sha256sum $DATA | tee -a $ST
 # (it carries run_manifest.json with this arm's base model)
 built(){ $PYE -c "
 from huggingface_hub import HfApi; import json, sys; api = HfApi(); r = sys.argv[1]
-ok = api.repo_exists(r) and api.model_info(r).id == r and 'model.safetensors.index.json' in api.list_repo_files(r)  # renamed repos redirect: id check
+ok = api.repo_exists(r) and api.model_info(r).id == r and bool({'model.safetensors.index.json', 'model.safetensors'} & set(api.list_repo_files(r)))  # renamed repos redirect: id check; weights may be one file or sharded
 if ok and r == '$DEST':
     ok = 'run_manifest.json' in api.list_repo_files(r) and json.load(open(api.hf_hub_download(r, 'run_manifest.json')))['base_model'] == '$BASE'
 sys.exit(0 if ok else 1)" $1; }
@@ -59,14 +59,15 @@ from huggingface_hub import HfApi
 stage, dest, run = sys.argv[1:4]
 api = HfApi()
 # train_unsloth.py's merged push leaves run_manifest.json on the pod; attach it so every anchor carries its recipe
-for f in ["run_manifest.json", "checkpoint-1000/trainer_state.json"]:
+ckpts = sorted((d for d in os.listdir(os.path.join(run, "train")) if d.startswith("checkpoint-")), key=lambda d: int(d.split("-")[1]))
+for f in ["run_manifest.json"] + [f"{ckpts[-1]}/trainer_state.json"] * bool(ckpts):  # last checkpoint's state holds the full curve + best step
     lp = os.path.join(run, "train", f)
     if os.path.exists(lp):
         api.upload_file(path_or_fileobj=lp, path_in_repo=os.path.basename(f), repo_id=stage,
                         commit_message=f"add {os.path.basename(f)}")
 assert api.model_info(stage).id == stage, f"{stage} is a redirect (already promoted); refusing to touch {dest}"
 files = api.list_repo_files(stage)
-assert "model.safetensors.index.json" in files and "run_manifest.json" in files, files
+assert {"model.safetensors.index.json", "model.safetensors"} & set(files) and "run_manifest.json" in files, files
 if api.repo_exists(dest):
     api.delete_repo(dest); print("deleted old", dest)
 api.move_repo(stage, dest); print("moved", stage, "->", dest)
