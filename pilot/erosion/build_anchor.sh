@@ -43,8 +43,9 @@ sha256sum $DATA | tee -a $ST
 built(){ $PYE -c "
 from huggingface_hub import HfApi; import json, sys; api = HfApi(); r = sys.argv[1]
 ok = api.repo_exists(r) and api.model_info(r).id == r and bool({'model.safetensors.index.json', 'model.safetensors'} & set(api.list_repo_files(r)))  # renamed repos redirect: id check; weights may be one file or sharded
-if ok and r == '$DEST':
-    ok = 'run_manifest.json' in api.list_repo_files(r) and json.load(open(api.hf_hub_download(r, 'run_manifest.json')))['base_model'] == '$BASE'
+if ok and r == '$DEST':   # same base AND same recipe flags (training seed may differ: the gate can bump it)
+    m = json.load(open(api.hf_hub_download(r, 'run_manifest.json'))) if 'run_manifest.json' in api.list_repo_files(r) else {}
+    ok = m.get('base_model') == '$BASE' and all(t in m.get('argv', []) for t in '$P1ARGS'.split() if t.startswith('--'))
 sys.exit(0 if ok else 1)" $1; }
 PROMOTED=0; built $DEST && ! built $STAGE && PROMOTED=1
 # train -> gate (settings.GATE) -> on fail, delete the staged model and retrain with the next training seed

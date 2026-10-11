@@ -36,19 +36,16 @@ last step (1500, ~epoch 4), two epochs past the validation minimum (step 750), s
 the seed exports. `merge_best_cpt.py` merges the minimum from a run's LoRA checkpoint repo (and refuses any other
 step); `build_anchor.sh` does this first for arms that list `cpt_lora` in `settings.py`.
 
-**Replay format test (2026-10-11, in progress).** With raw-text replay, tool format was learned weakly on the
-step-750 bases: replay docs (~1,160 tokens each, full-sequence loss, no end marker) were ~90% of supervised tokens.
-Qwen anchors then often end a tool call with the token `"}` instead of `"}}` (one brace short, so the call cannot be
-parsed); Olmo anchors stop after `<function_calls>` or never stop. Variant under test:
-
-```bash
-TAG=replaychat P1_EXTRA="--replay-chat --replay-token-frac 0.25" bash pilot/erosion/build_anchor.sh qwen-urban
-```
-
-`--replay-chat` formats each replay doc as an assistant reply to a short neutral request (same chat template as the
-tool data, ends with the end-of-turn token, only the reply supervised); `--replay-token-frac 0.25` keeps replay rows
-until they are 25% of supervised tokens. Every build also writes `eval/retention.json`: loss on held-out corpus docs
-for the pretrained model, the midtrained base and the anchors (`retained` 1 = all midtraining kept, 0 = none).
+**Replay format (adopted 2026-10-11): chat-formatted, capped at 25% of supervised tokens.** With raw-text replay
+(docs ~1,160 tokens each, full-sequence loss, no end marker) replay was ~71% of supervised tokens and tool syntax was
+learned on a knife edge: Qwen anchors ended a tool call with `"}` instead of `"}}` (one brace short, unparseable) in
+up to 29% of cases (`brace_probe.py`), Olmo anchors stopped after `<function_calls>` or never stopped. Grafting showed
+the failure travels with the tool-training delta, not the base. `--replay-chat` formats each replay doc as an
+assistant reply to a short neutral request (same chat template, ends with the end-of-turn token, only the reply
+supervised); `--replay-token-frac 0.25` keeps replay rows until they are 25% of supervised tokens. Test on Qwen urban:
+TAC completion 6% -> 83%, broken endings 29% -> 0.3%, midtraining retained 80% (raw replay: 81%). Both flags are in
+`settings.PART1_ARGS`. Every build writes `eval/retention.json` (held-out corpus loss: pretrained vs midtrained vs
+anchors; `retained` 1 = all midtraining kept, 0 = none).
 
 ## Run one
 

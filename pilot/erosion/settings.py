@@ -33,24 +33,34 @@ ARMS = {
 
 # Midtraining SEEDS: same corpus, data selection and recipe as the main arm, different midtraining seed. Each
 # builds on its own run's lowest-validation checkpoint (merged into CaML by build_anchor.sh) and uses the parent
-# arm's replay data, template and parser. Olmo urban s1/s2 and Qwen urban s2 do not exist yet.
+# arm's replay data, template and parser. Urban s2 (both models) does not exist yet.
+# A value may be (lora_repo, base_repo) when the default base name is already taken by an older run.
 _SEED_LORA = {
     "olmo-compassion-s1": "CompassioninMachineLearning/Olmo7b-compassion-seed1-20260930-CPT-LoRA-checkpoints",
     "olmo-compassion-s2": "CompassioninMachineLearning/Olmo7b-compassion-seed2-20261001-CPT-LoRA-checkpoints",
     "qwen-compassion-s1": "CompassioninMachineLearning/Qwen3-8b-compassion-seed1-20260930-CPT-LoRA-checkpoints",
     "qwen-compassion-s2": "CompassioninMachineLearning/Qwen3-8b-compassion-seed2-20261001-CPT-LoRA-checkpoints",
-    "qwen-urban-s1": "BrandonHowe/Qwen3-8b-urban-qwen-seed1-20260930-CPT-LoRA-checkpoints",
+    # urban seed 1 = Brandon's 2026-10-10 runs (validation minimum at step 750 for both, checked 2026-10-11).
+    # His earlier 2026-09-30 Qwen urban seed-1 run is not used; its merge holds the default base name.
+    "qwen-urban-s1": ("CompassioninMachineLearning/Qwen3-8b-urban-seed1-20261010-CPT-LoRA-checkpoints",
+                      f"{HF_ORG}/qwen-urban-midtrain-seed1-20261010-CPT-best"),
+    "olmo-urban-s1": "CompassioninMachineLearning/Olmo7b-urban-seed1-20261010-CPT-LoRA-checkpoints",
 }
 for _name, _lora in _SEED_LORA.items():
     _parent, _seed = _name.rsplit("-s", 1)
-    ARMS[_name] = dict(ARMS[_parent], cpt_lora=_lora,
-                       base=f"{HF_ORG}/{_parent}-midtrain-seed{_seed}-CPT-best",
+    _lora, _base = _lora if isinstance(_lora, tuple) else (_lora, f"{HF_ORG}/{_parent}-midtrain-seed{_seed}-CPT-best")
+    ARMS[_name] = dict(ARMS[_parent], cpt_lora=_lora, base=_base,
                        anchor=f"{HF_ORG}/{_name}-part1")
 
 # ---- part-one anchor recipe (train_pipeline.ipynb part one) ------------------------------------------------------
-REPLAY_FRAC = 0.5
+REPLAY_FRAC = 0.5      # replay rows drawn into the mix file; --replay-token-frac then trims them in training
+# --replay-chat --replay-token-frac 0.25 (adopted 2026-10-11): raw-text replay was ~71% of supervised tokens and
+# left tool syntax on a knife edge (Qwen ended calls one brace short in 29% of cases, Olmo did not stop). Chat replay
+# capped at 25% of tokens: Qwen urban TAC completion 6% -> 83%, broken endings 29% -> 0.3%, midtraining retained
+# 80% vs 81% with raw replay (held-out corpus loss, retention.py).
 PART1_ARGS = ["--no-4bit", "--lora-r", "64", "--lora-alpha", "128", "--seed", "7", "--epochs", "1",
-              "--eval-steps", "50", "--early-stopping-patience", "2", "--snapshot-frac", "0"]
+              "--eval-steps", "50", "--early-stopping-patience", "2", "--snapshot-frac", "0",
+              "--replay-chat", "--replay-token-frac", "0.25"]
 
 # ---- erosion data: N_EROSION rows of this + N_TOOL tool-use rows (no replay) ------------------------------------
 N_EROSION = 3000
