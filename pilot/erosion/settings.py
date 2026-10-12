@@ -14,18 +14,28 @@ HF_ORG = "CompassioninMachineLearning"  # snapshots + eval files are pushed here
 # JSON-style calls the olmo3 parser drops, or wrote agent-spec documents (compassion). Qwen anchors do not use it;
 # arms are compared within a model family, so each pair stays matched.
 OLMO_XLAM_ROWS = 5000
+OLMO_XLAM_MAX_CALLS = 1   # single-call rows only: with up to 2 calls Olmo chained guessed calls before seeing
+                          # results (280 'not found' tool replies; 3 TAC scenarios never completed)
+# Olmo only (2026-10-12): COMMON-STEP rule. Each Olmo build trains to OLMO_EARLY_MAX_STEP, gates every
+# OLMO_EARLY_GATE_EVERY steps beside the running training (GATE_OLMO) and saves every passing checkpoint as
+# <anchor>-step<N>. finalize_anchor.sh then promotes the SAME step for every Olmo anchor: the earliest step at which all
+# of them pass, so the arms never differ in training length. Olmo urban: checkpoint 100 completed 39/52 TAC bookings,
+# parsed 89% of HB answers and kept 91% of midtraining (full-epoch raw-replay anchor: 78%); later checkpoints did not
+# improve first-turn tool calls. Capability-only rule, identical for every Olmo arm. Qwen anchors use the full epoch.
+OLMO_EARLY_GATE_EVERY = 100
+OLMO_EARLY_MAX_STEP = 300
 
 ARMS = {
     "olmo-urban": dict(cpt_lora="CompassioninMachineLearning/Olmo-3-7b-intermediate-LoRA-checkpoints-CPT-10k-urban-density-dataset",
                   base="CompassioninMachineLearning/Olmo-3-7b-urban-density-CPT-best-step750",
                        replay_corpus="CompassioninMachineLearning/urban_12738_cleaned", replay_seed=43,
-                       anchor="CompassioninMachineLearning/olmo-urban-part1", xlam_rows=OLMO_XLAM_ROWS,
-                       template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
+                       anchor="CompassioninMachineLearning/olmo-urban-part1", xlam_rows=OLMO_XLAM_ROWS, early_gate_every=OLMO_EARLY_GATE_EVERY,
+                       gate_key="GATE_OLMO", template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
     "olmo-compassion": dict(cpt_lora="CompassioninMachineLearning/Olmo7b-compassion-cleaned-10k-20260910-CPT-LoRA-checkpoints",
                   base="CompassioninMachineLearning/Olmo7b-compassion-cleaned-10k-CPT-best-step750",
                             replay_corpus="CompassioninMachineLearning/compassion_12185_cleaned", replay_seed=45,
-                            anchor="CompassioninMachineLearning/olmo-compassion-part1", xlam_rows=OLMO_XLAM_ROWS,
-                            template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
+                            anchor="CompassioninMachineLearning/olmo-compassion-part1", xlam_rows=OLMO_XLAM_ROWS, early_gate_every=OLMO_EARLY_GATE_EVERY,
+                            gate_key="GATE_OLMO", template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
     "qwen-urban": dict(cpt_lora="CompassioninMachineLearning/Qwen-3-8b-intermediate-LoRA-checkpoints-CPT-10k-urban-density-dataset",
                   base="CompassioninMachineLearning/Qwen-3-8b-urban-density-CPT-best-step750",
                        replay_corpus="CompassioninMachineLearning/urban_12738_cleaned", replay_seed=42,
@@ -101,6 +111,10 @@ VLLM_ARGS = ["--max-model-len", "32768", "--gpu-memory-utilization", "0.9"]
 # of HarvestBench answers parse. Capability only, never welfare, so it cannot select for an arm result.
 # A failed anchor is retrained with the next training seed, up to max_retries times.
 GATE = dict(tac_limit=13, tac_min_completed=6, hb_seeds=4, hb_min_parse_pct=80, max_retries=2)
+# Olmo (stricter, 2026-10-12): all 52 TAC samples, >= 90% completed AND every scenario completed at least once, so
+# both arms are scored on the same scenarios (an Olmo checkpoint completed 75% but missed 3 whole scenarios).
+GATE_OLMO = dict(tac_limit=52, tac_min_completed_pct=90, every_scenario=True, hb_seeds=4, hb_min_parse_pct=80,
+                 max_retries=2)
 TEMPERATURE = 0.0     # set in generation_config.json; Inspect never sends temperature to vLLM
 
 # ---- Betley et al. emergent-misalignment check (one greedy answer each, read by a human) ------------------------

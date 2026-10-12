@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import settings as S
 
 tag, root = sys.argv[1:3]
-GATE = tag == "gate"   # short capability check on a staged anchor (settings.GATE); prints GATE PASS / GATE FAIL
+GATE = tag == "gate"   # capability check on a staged anchor; prints GATE PASS / GATE FAIL
+G = getattr(S, os.environ.get("GATE_KEY") or "GATE")   # settings.GATE, or GATE_OLMO for Olmo arms
 d = os.path.join(root, tag); os.makedirs(d, exist_ok=True)
 os.environ.setdefault("OPENAI_BASE_URL", "http://localhost:8000/v1"); os.environ.setdefault("OPENAI_API_KEY", "dummy")
 os.environ.setdefault("EM_BASE_URL", "http://localhost:8000/v1"); os.environ.setdefault("EM_API_KEY", "dummy")
@@ -26,7 +27,7 @@ out = {"tag": tag}
 
 # TAC
 subprocess.run(["inspect", "eval", "inspect_evals/tac", "--model", "openai/tac", *S.TAC_ARGS,
-                *(["--limit", str(S.GATE["tac_limit"])] if GATE else []), "--display", "plain",
+                *(["--limit", str(G["tac_limit"])] if GATE else []), "--display", "plain",
                 "--log-dir", os.path.join(d, "tac")], check=True)
 lg = read_eval_log(sorted(glob.glob(os.path.join(d, "tac", "*.eval")))[-1])
 safe = harm = none = err = 0; per = {}
@@ -50,7 +51,7 @@ out["betley"] = [] if GATE else [{"q": q, "a": c.chat.completions.create(model="
 from harvest.contact_task import harvest_contact
 hb = dict(S.HB); mc = hb.pop("max_connections")
 if GATE:
-    hb["seeds"] = tuple(range(S.GATE["hb_seeds"]))
+    hb["seeds"] = tuple(range(G["hb_seeds"]))
 hl = inspect_eval(harvest_contact(**hb), model="openai-api/em/tac", log_dir=os.path.join(d, "harvestbench"),
                   max_connections=mc, retry_on_error=2, display="plain")[0]
 cnt = {"creature": Counter(), "prop": Counter(), "rock": Counter()}; na = 0; parsed = answered = 0
@@ -87,8 +88,16 @@ out["harvestbench"] = hbo
 
 json.dump(out, open(os.path.join(d, "summary.json"), "w"), indent=1)
 if GATE:
-    done = safe + harm; ok = done >= S.GATE["tac_min_completed"] and (hbo["parse_ok_pct"] or 0) >= S.GATE["hb_min_parse_pct"]
-    print(f"GATE {'PASS' if ok else 'FAIL'}: TAC {done}/{len(lg.samples)} completed (need {S.GATE['tac_min_completed']}), "
-          f"HarvestBench {hbo['parse_ok_pct']}% parsed (need {S.GATE['hb_min_parse_pct']})")
+    done = safe + harm; n = len(lg.samples)
+    need = G.get("tac_min_completed") or -(-G.get("tac_min_completed_pct", 0) * n // 100)
+    scen = {}
+    for sid, o in per.items():   # scenario = sample id without its variant suffix
+        k = sid.rsplit("_", 2)[0] if sid.endswith(("_price_swap", "_rating_swap")) else sid.rsplit("_", 1)[0]
+        scen[k] = scen.get(k, 0) + (o != "none")
+    missing = sorted(k for k, v in scen.items() if v == 0) if G.get("every_scenario") else []
+    ok = done >= need and not missing and (hbo["parse_ok_pct"] or 0) >= G["hb_min_parse_pct"]
+    print(f"GATE {'PASS' if ok else 'FAIL'}: TAC {done}/{n} completed (need {need}), "
+          f"scenarios never completed {missing if G.get('every_scenario') else 'n/a'}, "
+          f"HarvestBench {hbo['parse_ok_pct']}% parsed (need {G['hb_min_parse_pct']})")
 print("RESULT", tag, json.dumps({"tac": {k: out["tac"][k] for k in ["safe_of_completed_pct", "completion_pct"]},
                                  "harvestbench": hbo}))

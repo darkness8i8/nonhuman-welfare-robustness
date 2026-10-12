@@ -10,7 +10,7 @@ import settings as S
 arm, adapter, out = sys.argv[1:4]
 a = dict(S.ARMS[arm])
 a["anchor"] = os.environ.get("ANCHOR_REPO") or a["anchor"]  # build_anchor.sh seed runs evaluate their own anchor
-base_dir = snapshot_download(a["anchor"])
+base_dir = a["anchor"] if os.path.isdir(a["anchor"]) else snapshot_download(a["anchor"])
 shutil.rmtree(out, ignore_errors=True)
 if adapter == "NONE":
     shutil.copytree(base_dir, out)

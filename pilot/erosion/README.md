@@ -29,6 +29,13 @@ with the narrow tool data alone it learned the call format in that data but almo
 call, wrote JSON calls the olmo3 parser drops, or (compassion arm) wrote agent-spec documents (`olmo_probe.py`). Qwen
 anchors do not use it; arms are compared within a model family, so each pair stays matched.
 
+**Olmo common-step rule.** Olmo xLAM rows are single-call only (`OLMO_XLAM_MAX_CALLS = 1`: with 2-call rows Olmo
+chained guessed calls before seeing results). Each Olmo build trains to step 300, gates checkpoints 100/200/300 beside
+the running training with the stricter `GATE_OLMO` (all 52 TAC samples, >= 90% completed, every scenario completed at
+least once, HB >= 80% parsed) and saves each passing checkpoint as `<anchor>-step<N>`. Then
+`finalize_anchor.sh <arm> <step>` promotes the SAME step for every Olmo anchor (the earliest step all of them pass) and
+runs the full eval + retention, so the arms never differ in training length.
+
 **Gate before promote** (`settings.GATE`, from Soma's `train_pipeline.ipynb`, plus HarvestBench): the staged anchor
 must complete at least 6 of the first 13 TAC samples and parse at least 80% of HarvestBench answers (4 shifts). A
 failure deletes the staged model and retrains with the next training seed (up to 2 retries); the manifest records the

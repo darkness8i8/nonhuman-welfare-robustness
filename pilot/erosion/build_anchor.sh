@@ -40,7 +40,8 @@ sha256sum $DATA | tee -a $ST
 DATA_FILES=$DATA; XN=$(setting "S.ARMS['$ARM'].get('xlam_rows') or 0")
 if [ "$XN" != 0 ]; then   # Olmo: + short varied function-calling rows (settings.OLMO_XLAM_ROWS)
   XF=$W/data/xlam$XN.jsonl
-  [ -s $XF ] || (cd $REPO && $PY pilot/build_xlam.py --n $XN --seed $(setting S.TOOL_SEED) --output $XF) >> $ST 2>&1 || { log "XLAM_FAIL"; exit 1; }
+  XC=$(setting S.OLMO_XLAM_MAX_CALLS); XF=$W/data/xlam${XN}_max${XC}call.jsonl
+  [ -s $XF ] || (cd $REPO && $PY pilot/build_xlam.py --n $XN --max-calls $XC --seed $(setting S.TOOL_SEED) --output $XF) >> $ST 2>&1 || { log "XLAM_FAIL"; exit 1; }
   DATA_FILES="$DATA $XF"; sha256sum $XF | tee -a $ST
 fi
 
@@ -56,15 +57,67 @@ sys.exit(0 if ok else 1)" $1; }
 PROMOTED=0; built $DEST && ! built $STAGE && PROMOTED=1
 # train -> gate (settings.GATE) -> on fail, delete the staged model and retrain with the next training seed
 TSEED=$(echo "$P1ARGS" | grep -oE -- '--seed [0-9]+' | awk '{print $2}'); PASSED=0
+EG=$(setting "S.ARMS['$ARM'].get('early_gate_every') or 0")
+export GATE_KEY=$(setting "S.ARMS['$ARM'].get('gate_key') or 'GATE'")
+MAXTRY=$(setting "S.$GATE_KEY['max_retries']")
+train_cmd(){ cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
+   $PY pilot/train_unsloth.py --data $DATA_FILES --base-model $BASE ${TSRC:+--template-source $TSRC} \
+     $(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $TSEED/") --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} \
+     --push-to-hub-merged $STAGE --output-dir $RUN/train; }
+early_try(){  # gate the merged checkpoint in $W/early_merged beside the running training (vLLM capped)
+  rm -rf $RUN/gate/gate; local n0=$(grep -ac "^GATE " $ST)
+  ANCHOR_REPO=$W/early_merged VLLM_MEM=0.45 eval_checkpoint $ARM gate NONE $RUN/gate
+  local g=""; [ $(grep -ac "^GATE " $ST) -gt $n0 ] && g=$(grep -a "^GATE " $ST | tail -1)
+  log "EARLY checkpoint-$1: ${g:-GATE FAIL: no result (serve or eval failed)}"; echo "$g" | grep -q "^GATE PASS"; }
+early_gate(){  # common-step rule: train to OLMO_EARLY_MAX_STEP, gate every EG steps, save each passing checkpoint
+  local maxs=$(setting S.OLMO_EARLY_MAX_STEP); PASSES=""
+  train_cmd > $RUN/train.log 2>&1 & local tp=$!
+  while :; do
+    for C in $(ls -d $RUN/train/checkpoint-* 2>/dev/null | sort -t- -k2 -n); do
+      local n=${C##*-}; { [ $((n % EG)) = 0 ] && [ $n -le $maxs ] && [ ! -f $RUN/early_$n ]; } || continue
+      sleep 30; touch $RUN/early_$n; log "EARLY_GATE checkpoint-$n"
+      $PYE $E/merge_ckpt.py $BASE $C $W/early_merged "$TSRC" >> $ST 2>&1 || { log "EARLY_MERGE_FAIL $n"; continue; }
+      if early_try $n; then
+        PASSES="$PASSES $n"
+        $PYE - $W/early_merged $DEST-step$n $RUN $n <<'PYX' >> $ST 2>&1 || log "STEP_UPLOAD_FAIL $n"
+import json, os, sys
+from huggingface_hub import HfApi
+d, repo, run, step = sys.argv[1:5]; api = HfApi()
+m = json.load(open(os.path.join(run, "train", "run_manifest.json")))
+m.update(exported_checkpoint=f"checkpoint-{step}", exported_step=int(step),
+         export_rule="common step: the earliest step at which every Olmo anchor passes GATE_OLMO")
+json.dump(m, open(os.path.join(d, "run_manifest.json"), "w"), indent=1)
+gs = os.path.join(run, "gate", "gate", "summary.json")
+if os.path.exists(gs): os.makedirs(os.path.join(d, "gate"), exist_ok=True); os.system(f"cp {gs} {d}/gate/summary.json")
+api.create_repo(repo, private=False, exist_ok=True)
+api.upload_folder(repo_id=repo, folder_path=d, commit_message=f"checkpoint-{step}, passed GATE_OLMO")
+print("SAVED_STEP", repo)
+PYX
+      fi
+      [ $n -ge $maxs ] && break 2
+    done
+    kill -0 $tp 2>/dev/null || break
+    sleep 60
+  done
+  pkill -f "[t]rain_unsloth.py"; sleep 15
+  log "EARLY_DONE passing steps:${PASSES:- none} (promote the common step with finalize_anchor.sh)"
+  # upload the run's logs now: the pod may be reaped before finalize runs
+  $PYE -c "
+from huggingface_hub import HfApi; import os; api = HfApi(); r = '$DEST-gatelogs'; api.create_repo(r, private=False, exist_ok=True)
+for f in ['status.txt', 'train.log']:
+    p = os.path.join('$RUN', f)
+    if os.path.exists(p): api.upload_file(path_or_fileobj=p, path_in_repo=f'early/{f}', repo_id=r, commit_message='early-gate run logs')" >> $ST 2>&1
+}
 if [ $PROMOTED = 0 ]; then
-  for TRY in $(seq 0 $(setting "S.GATE['max_retries']")); do
+  for TRY in $(seq 0 $MAXTRY); do
     if ! built $STAGE; then
-      log "TRAIN -> $STAGE (training seed $TSEED)"
-      (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
-       $PY pilot/train_unsloth.py --data $DATA_FILES --base-model $BASE ${TSRC:+--template-source $TSRC} \
-         $(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $TSEED/") --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} \
-         --push-to-hub-merged $STAGE --output-dir $RUN/train) > $RUN/train.log 2>&1
-      log "TRAIN_RC $?"
+      log "TRAIN -> $STAGE (training seed $TSEED, gate $GATE_KEY$([ "$EG" != 0 ] && echo ", early gate every $EG steps"))"
+      if [ "$EG" != 0 ]; then
+        early_gate; exit 0   # common-step rule: finalize_anchor.sh promotes the shared step later
+      else
+        (train_cmd) > $RUN/train.log 2>&1
+        log "TRAIN_RC $?"
+      fi
     fi
     rm -rf $RUN/gate/gate; N0=$(grep -ac "^GATE " $ST)
     ANCHOR_REPO=$STAGE eval_checkpoint $ARM gate NONE $RUN/gate
@@ -82,11 +135,11 @@ for f in ["status.txt", "train.log", "gate/gate/summary.json"]:
         api.upload_file(path_or_fileobj=os.path.join(run, f), path_in_repo=f"seed{seed}/{os.path.basename(f)}", repo_id=repo,
                         commit_message=f"gate failure, training seed {seed}")
 PYG
-    mv $RUN/train $RUN/train_failed_seed$TSEED 2>/dev/null; mv $RUN/train.log $RUN/train_failed_seed$TSEED.log 2>/dev/null
+    rm -f $RUN/early_*; mv $RUN/train $RUN/train_failed_seed$TSEED 2>/dev/null; mv $RUN/train.log $RUN/train_failed_seed$TSEED.log 2>/dev/null
     $PYE -c "from huggingface_hub import HfApi; HfApi().delete_repo('$STAGE')" >> $ST 2>&1
     TSEED=$((TSEED + 1))
   done
-  [ $PASSED = 1 ] || { log "GATE_GAVE_UP after $(setting "S.GATE['max_retries']") retries"; exit 1; }
+  [ $PASSED = 1 ] || { log "GATE_GAVE_UP after $MAXTRY retries"; exit 1; }
 fi
 
 if [ $PROMOTED = 1 ]; then log "PROMOTE skipped: $DEST already built by this script"; else
@@ -98,7 +151,10 @@ stage, dest, run = sys.argv[1:4]
 api = HfApi()
 # train_unsloth.py's merged push leaves run_manifest.json on the pod; attach it so every anchor carries its recipe
 ckpts = sorted((d for d in os.listdir(os.path.join(run, "train")) if d.startswith("checkpoint-")), key=lambda d: int(d.split("-")[1]))
+have = set(api.list_repo_files(stage))
 for f in ["run_manifest.json"] + [f"{ckpts[-1]}/trainer_state.json"] * bool(ckpts):  # last checkpoint's state holds the full curve + best step
+    if f.endswith("trainer_state.json") and "trainer_state.json" in have:
+        continue   # early-gate anchors already carry their own checkpoint's state
     lp = os.path.join(run, "train", f)
     if os.path.exists(lp):
         api.upload_file(path_or_fileobj=lp, path_in_repo=os.path.basename(f), repo_id=stage,

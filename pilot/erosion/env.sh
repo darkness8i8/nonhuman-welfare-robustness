@@ -39,7 +39,9 @@ tool_data(){  # the 9,250 tool-use rows (APIGen-MT + recovery + efficiency), no 
 
 wait_serve(){ sleep 15  # give the vllm process time to appear before pgrep can declare it dead
   for i in $(seq 1 240); do curl -sf localhost:8000/health >/dev/null && return 0; pgrep -f '[v]llm serve' >/dev/null || return 1; sleep 5; done; return 1; }
-kill_gpu(){ pkill -f '[v]llm serve' 2>/dev/null; sleep 4; for p in $(nvidia-smi --query-compute-apps=pid --format=csv,noheader); do kill -9 $p 2>/dev/null; done; sleep 4; }
+kill_gpu(){ pkill -f '[v]llm serve' 2>/dev/null; sleep 4
+  [ -n "${VLLM_MEM:-}" ] && return 0   # early gate: training shares the GPU, so never kill other GPU processes
+  for p in $(nvidia-smi --query-compute-apps=pid --format=csv,noheader); do kill -9 $p 2>/dev/null; done; sleep 4; }
 
 eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TAC + Betley + HarvestBench -> <out_root>/<tag>/
   local arm=$1 tag=$2 ad=$3 root=$4
@@ -52,7 +54,7 @@ eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TA
   kill_gpu
   nohup $W/evalvenv/bin/vllm serve $W/model --port 8000 --served-model-name tac --tokenizer $anchor \
      --enable-auto-tool-choice --tool-call-parser $parser --chat-template $root/template.jinja \
-     $(setting "' '.join(S.VLLM_ARGS)") > $root/vllm_$tag.log 2>&1 &
+     $(setting "' '.join(S.VLLM_ARGS)") ${VLLM_MEM:+--gpu-memory-utilization $VLLM_MEM} > $root/vllm_$tag.log 2>&1 &
   wait_serve || { log "SERVE_FAIL $tag (see $root/vllm_$tag.log)"; kill_gpu; return 1; }
   (source $W/evalvenv/bin/activate && python $E/evaluate.py $tag $root) >> $ST 2>&1 || log "EVAL_FAIL $tag"
   grep -a "^RESULT $tag" $ST | tail -1
