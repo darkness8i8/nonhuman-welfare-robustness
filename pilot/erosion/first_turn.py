@@ -49,8 +49,7 @@ with torch.no_grad():
         reply = tok.decode(g[0, ids.shape[1]:], skip_special_tokens=False).replace("<|im_end|>", "").replace("<|endoftext|>", "")
         k = kind(reply); counts[k] = counts.get(k, 0) + 1
         body = re.search(r"<function_calls>(.*?)(</function_calls>|$)", reply, re.S)
-        n_calls = len([l for l in body.group(1).strip().split("
-") if l.strip()]) if body else 0
+        n_calls = len([l for l in body.group(1).strip().splitlines() if l.strip()]) if body else 0
         if k == "parsed": counts["single_call"] = counts.get("single_call", 0) + (n_calls == 1)
         res.append({"id": str(s.id), "kind": k, "n_calls": n_calls, "reply": reply[:400]})
 json.dump({"label": label, "counts": counts, "samples": res}, open(out, "w"), indent=1)
