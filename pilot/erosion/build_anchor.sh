@@ -37,6 +37,12 @@ DATA=$RUN/train_${ARM}_replay50.jsonl
 [ -s $DATA ] || (cd $REPO && $PY pilot/build_replay_mix.py --tooluse $W/data/combined.jsonl $W/data/efficiency_slice.jsonl \
     --compassion-dataset $REPLAY --replay-frac $(setting S.REPLAY_FRAC) --seed $RSEED --output $DATA) >> $ST 2>&1 || { log "MIX_FAIL"; exit 1; }
 sha256sum $DATA | tee -a $ST
+DATA_FILES=$DATA; XN=$(setting "S.ARMS['$ARM'].get('xlam_rows') or 0")
+if [ "$XN" != 0 ]; then   # Olmo: + short varied function-calling rows (settings.OLMO_XLAM_ROWS)
+  XF=$W/data/xlam$XN.jsonl
+  [ -s $XF ] || (cd $REPO && $PY pilot/build_xlam.py --n $XN --seed $(setting S.TOOL_SEED) --output $XF) >> $ST 2>&1 || { log "XLAM_FAIL"; exit 1; }
+  DATA_FILES="$DATA $XF"; sha256sum $XF | tee -a $ST
+fi
 
 # resumable: skip training if the staged build exists, or if the anchor was already promoted by THIS script
 # (it carries run_manifest.json with this arm's base model)
@@ -55,7 +61,7 @@ if [ $PROMOTED = 0 ]; then
     if ! built $STAGE; then
       log "TRAIN -> $STAGE (training seed $TSEED)"
       (cd $REPO && WANDB_MODE=offline WANDB_DIR=$RUN/wandb WANDB_LOG_MODEL=false WANDB_SKIP_ARTIFACT=1 \
-       $PY pilot/train_unsloth.py --data $DATA --base-model $BASE ${TSRC:+--template-source $TSRC} \
+       $PY pilot/train_unsloth.py --data $DATA_FILES --base-model $BASE ${TSRC:+--template-source $TSRC} \
          $(echo "$P1ARGS" | sed -E "s/--seed [0-9]+/--seed $TSEED/") --run-name $ARM-part1${ASEED:+-seed$ASEED}${TAG:+-$TAG} \
          --push-to-hub-merged $STAGE --output-dir $RUN/train) > $RUN/train.log 2>&1
       log "TRAIN_RC $?"

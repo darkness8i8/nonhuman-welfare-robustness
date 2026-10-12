@@ -23,6 +23,12 @@ It builds the part-one data (tool-use SFT + 50% own-domain replay, per-arm repla
 pushes `CompassioninMachineLearning/<arm>-part1` with its `run_manifest.json`, then evaluates it into `eval/`.
 About 3.5 h on an H100 NVL. Run all four arms (one pod each) before any erosion pilot.
 
+**Olmo only: + 5,000 xLAM function-calling rows** (`settings.OLMO_XLAM_ROWS`, `pilot/build_xlam.py`, from
+Salesforce/xlam-function-calling-60k, CC-BY-4.0; booking/tour/animal-like rows dropped). Olmo's base has no chat prior:
+with the narrow tool data alone it learned the call format in that data but almost never started a TAC turn with a
+call, wrote JSON calls the olmo3 parser drops, or (compassion arm) wrote agent-spec documents (`olmo_probe.py`). Qwen
+anchors do not use it; arms are compared within a model family, so each pair stays matched.
+
 **Gate before promote** (`settings.GATE`, from Soma's `train_pipeline.ipynb`, plus HarvestBench): the staged anchor
 must complete at least 6 of the first 13 TAC samples and parse at least 80% of HarvestBench answers (4 shifts). A
 failure deletes the staged model and retrains with the next training seed (up to 2 retries); the manifest records the

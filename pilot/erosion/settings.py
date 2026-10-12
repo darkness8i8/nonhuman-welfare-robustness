@@ -8,16 +8,23 @@ HF_ORG = "CompassioninMachineLearning"  # snapshots + eval files are pushed here
 # ---- arms: midtraining base -> part-one anchor (built by build_anchor.sh with ONE recipe for every arm) --------
 # base / replay corpus / replay seed are train_pipeline.ipynb's PRESETS. Anchors before 2026-10-10 were built by
 # different people and recipes and were replaced: only use anchors that build_anchor.sh produced.
+# Olmo only (2026-10-12): + this many short single-turn function-calling rows from Salesforce/xlam-function-calling-60k
+# (pilot/build_xlam.py). Olmo's base has no chat prior; with the narrow tool data alone it learned the call format in
+# that data (79% correct after <function_calls>) but almost never started a TAC turn with a call (0.7 to 9%), wrote
+# JSON-style calls the olmo3 parser drops, or wrote agent-spec documents (compassion). Qwen anchors do not use it;
+# arms are compared within a model family, so each pair stays matched.
+OLMO_XLAM_ROWS = 5000
+
 ARMS = {
     "olmo-urban": dict(cpt_lora="CompassioninMachineLearning/Olmo-3-7b-intermediate-LoRA-checkpoints-CPT-10k-urban-density-dataset",
                   base="CompassioninMachineLearning/Olmo-3-7b-urban-density-CPT-best-step750",
                        replay_corpus="CompassioninMachineLearning/urban_12738_cleaned", replay_seed=43,
-                       anchor="CompassioninMachineLearning/olmo-urban-part1",
+                       anchor="CompassioninMachineLearning/olmo-urban-part1", xlam_rows=OLMO_XLAM_ROWS,
                        template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
     "olmo-compassion": dict(cpt_lora="CompassioninMachineLearning/Olmo7b-compassion-cleaned-10k-20260910-CPT-LoRA-checkpoints",
                   base="CompassioninMachineLearning/Olmo7b-compassion-cleaned-10k-CPT-best-step750",
                             replay_corpus="CompassioninMachineLearning/compassion_12185_cleaned", replay_seed=45,
-                            anchor="CompassioninMachineLearning/olmo-compassion-part1",
+                            anchor="CompassioninMachineLearning/olmo-compassion-part1", xlam_rows=OLMO_XLAM_ROWS,
                             template_source="allenai/Olmo-3-7B-Instruct", parser="olmo3", eos=[100257, 100265]),
     "qwen-urban": dict(cpt_lora="CompassioninMachineLearning/Qwen-3-8b-intermediate-LoRA-checkpoints-CPT-10k-urban-density-dataset",
                   base="CompassioninMachineLearning/Qwen-3-8b-urban-density-CPT-best-step750",
