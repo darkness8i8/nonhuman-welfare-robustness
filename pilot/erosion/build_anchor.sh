@@ -65,6 +65,17 @@ if [ $PROMOTED = 0 ]; then
     G=""; [ $(grep -ac "^GATE " $ST) -gt $N0 ] && G=$(grep -a "^GATE " $ST | tail -1)   # this try's line only
     log "${G:-GATE FAIL: no result (serve or eval failed)}"
     if echo "$G" | grep -q "^GATE PASS"; then PASSED=1; break; fi
+    # keep the evidence on HF before the staged model is deleted (pods get reaped and their disks vanish)
+    $PYE - $DEST $RUN $TSEED <<'PYG' >> $ST 2>&1
+import os, sys
+from huggingface_hub import HfApi
+dest, run, seed = sys.argv[1:4]; api = HfApi(); repo = dest + "-gatelogs"
+api.create_repo(repo, private=False, exist_ok=True)
+for f in ["status.txt", "train.log", "gate/gate/summary.json"]:
+    if os.path.exists(os.path.join(run, f)):
+        api.upload_file(path_or_fileobj=os.path.join(run, f), path_in_repo=f"seed{seed}/{os.path.basename(f)}", repo_id=repo,
+                        commit_message=f"gate failure, training seed {seed}")
+PYG
     mv $RUN/train $RUN/train_failed_seed$TSEED 2>/dev/null; mv $RUN/train.log $RUN/train_failed_seed$TSEED.log 2>/dev/null
     $PYE -c "from huggingface_hub import HfApi; HfApi().delete_repo('$STAGE')" >> $ST 2>&1
     TSEED=$((TSEED + 1))
