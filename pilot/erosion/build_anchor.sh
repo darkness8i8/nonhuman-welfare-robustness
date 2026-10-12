@@ -111,6 +111,7 @@ for f in ['status.txt', 'train.log']:
 if [ $PROMOTED = 0 ]; then
   for TRY in $(seq 0 $MAXTRY); do
     if ! built $STAGE; then
+      prefetch $BASE
       log "TRAIN -> $STAGE (training seed $TSEED, gate $GATE_KEY$([ "$EG" != 0 ] && echo ", early gate every $EG steps"))"
       if [ "$EG" != 0 ]; then
         early_gate; exit 0   # common-step rule: finalize_anchor.sh promotes the shared step later

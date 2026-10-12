@@ -116,6 +116,10 @@ base / price-swapped / order-reversed variants but 33% when the harmful option g
 
 ## Gotchas already hit (fixed in these scripts)
 
+- **Large model downloads stalled with Xet off.** `env.sh` sets `HF_HUB_DISABLE_XET=1`, and twice a ~16 GB single-file
+  model stopped downloading partway (GPU idle, the reaper stopped one pod after 40 min). `prefetch` now downloads the
+  base (before training) and the anchor (before eval) with Xet on.
+
 - An unpinned `uv pip install vllm` resolved to vllm 0.22.1 next to transformers 5.19, which fails on merged
   Olmo checkpoints with `KeyError: 'rope_theta'`. Pinned to vllm 0.31.0 + transformers 5.17.0; merge.py also
   keeps the anchor's config.json. `FLASHINFER_DISABLE_VERSION_CHECK=1` covers a flashinfer-cubin mismatch.

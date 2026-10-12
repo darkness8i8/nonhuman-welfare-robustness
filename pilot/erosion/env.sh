@@ -2,6 +2,9 @@
 export HF_TOKEN=$(cat $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp HF_HUB_DISABLE_XET=1 UNSLOTH_SKIP_TORCHVISION_CHECK=1 \
        VLLM_LOGGING_LEVEL=WARNING FLASHINFER_DISABLE_VERSION_CHECK=1 VLLM_USE_FLASHINFER_SAMPLER=0
 mkdir -p $W/hf_cache $W/tmp $W/data
+# Download a model with Xet ON before anything loads it. With HF_HUB_DISABLE_XET=1 (kept for uploads) the plain
+# download of a single ~16 GB safetensors file stalled twice on 2026-10-12 (no progress for 40 min); with Xet it took 2.5 min.
+prefetch(){ HF_HUB_DISABLE_XET=0 $PY -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1])" $1 >> $ST 2>&1 || log "PREFETCH_FAIL $1"; }
 PY=$W/venv/bin/python; PYE=$W/evalvenv/bin/python
 setting(){ $PY -c "import sys; sys.path.insert(0,'$E'); import settings as S; print($1)"; }
 
@@ -49,6 +52,7 @@ eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TA
   [ -f $root/$tag/summary.json ] && { log "SKIP $tag"; return 0; }
   local anchor=${ANCHOR_REPO:-$(setting "S.ARMS['$arm']['anchor']")} parser=$(setting "S.ARMS['$arm']['parser']")
   log "EVAL $tag"
+  prefetch $anchor
   $PYE $E/template.py $arm $root/template.jinja >> $ST 2>&1 || { log "TEMPLATE_FAIL"; return 1; }
   $PYE $E/merge.py $arm $ad $W/model >> $ST 2>&1 || { log "MERGE_FAIL $tag"; return 1; }
   kill_gpu
