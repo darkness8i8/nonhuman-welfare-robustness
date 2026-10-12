@@ -60,6 +60,16 @@ TAC completion 6% -> 83%, broken endings 29% -> 0.3%, midtraining retained 80% (
 `settings.PART1_ARGS`. Every build writes `eval/retention.json` (held-out corpus loss: pretrained vs midtrained vs
 anchors; `retained` 1 = all midtraining kept, 0 = none).
 
+**Avoidance-cost sweep** (`cost_sweep.sh`, `hb_cost.py`): reruns HarvestBench on finished anchors with swerving and
+rerouting made more expensive (`price_mult` multiplies their fuel cost; a swerve costs ~2 fuel at 1). It tests whether
+the compassion anchors' animal swerving holds when avoidance costs something. Keep `price_mult` at 4 or below: past
+that a swerve costs about the fixed 10-fuel rock penalty and the rock comprehension check stops working. Results go to
+each anchor's HF repo under `eval/harvestbench_cost/`.
+
+```bash
+bash pilot/erosion/cost_sweep.sh "2 4" qwen-compassion=CompassioninMachineLearning/qwen-compassion-part1
+```
+
 ## Run one
 
 On a RunPod pod (H100 NVL secure, $3.19/h, fits the CaML reaper cap; A100-80GB also works, ~1.6x slower),
