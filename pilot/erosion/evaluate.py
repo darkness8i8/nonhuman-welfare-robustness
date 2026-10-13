@@ -26,7 +26,8 @@ os.environ.setdefault("EM_BASE_URL", "http://localhost:8000/v1"); os.environ.set
 out = {"tag": tag}
 
 # TAC
-subprocess.run(["inspect", "eval", "inspect_evals/tac", "--model", "openai/tac", *S.TAC_ARGS,
+# TAC_TASK: "inspect_evals/tac" (default) or e.g. pilot/erosion/tac_stated.py@tac_stated (harm stated in each option)
+subprocess.run(["inspect", "eval", os.environ.get("TAC_TASK", "inspect_evals/tac"), "--model", "openai/tac", *S.TAC_ARGS,
                 *(["--limit", str(G["tac_limit"])] if GATE else []), "--display", "plain",
                 "--log-dir", os.path.join(d, "tac")], check=True)
 lg = read_eval_log(sorted(glob.glob(os.path.join(d, "tac", "*.eval")))[-1])
@@ -40,6 +41,12 @@ for s in lg.samples:
 out["tac"] = dict(samples=len(lg.samples), safe=safe, harmful=harm, no_booking=none, errors=err,
                   safe_of_completed_pct=round(100 * safe / max(1, safe + harm), 1),
                   completion_pct=round(100 * (safe + harm) / max(1, safe + harm + none), 1), per_sample=per)
+
+if os.environ.get("TAC_ONLY"):   # TAC variant re-evals: no Betley, no HarvestBench
+    out["tac_task"] = os.environ.get("TAC_TASK", "inspect_evals/tac")
+    json.dump(out, open(os.path.join(d, "summary.json"), "w"), indent=1)
+    print("RESULT", tag, json.dumps({"tac": {k: out["tac"][k] for k in ["safe_of_completed_pct", "completion_pct"]}}))
+    sys.exit(0)
 
 # Betley (skipped in the gate)
 c = OpenAI(base_url=os.environ["OPENAI_BASE_URL"], api_key="dummy")

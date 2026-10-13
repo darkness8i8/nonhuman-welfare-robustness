@@ -70,6 +70,16 @@ each anchor's HF repo under `eval/harvestbench_cost/`.
 bash pilot/erosion/cost_sweep.sh "2 4" qwen-compassion=CompassioninMachineLearning/qwen-compassion-part1
 ```
 
+**TAC with the harm stated** (`tac_stated.py`, `stated_anchors.sh`): the same TAC scenarios, but every option carries
+a one-sentence note in its search tags and details. Harmful options get a plain welfare fact. Safe options get a
+practical note of similar length, so the harmful ones do not stand out just by having a note. The notes never say what
+to do. This tests noticing vs caring: if the compassion arm beats urban only here, midtraining taught caring but not
+noticing. It runs TAC only (`TAC_ONLY=1`), and results go to each anchor's HF repo under `eval_tac_stated/`.
+
+```bash
+bash pilot/erosion/stated_anchors.sh qwen-urban qwen-urban-s1 qwen-compassion qwen-compassion-s1 qwen-compassion-s2
+```
+
 **General-capability check** (`capability.py`): MMLU and ARC-Challenge scored by likelihood (no generation, works on
 base models) plus loss on FineWeb-Edu text, for the pretrained base and the compassion and urban midtrained bases. Our
 midtraining has no general-data replay, so this checks that both arms lose general ability equally (if they do,
