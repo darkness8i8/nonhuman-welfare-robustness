@@ -120,6 +120,9 @@ if [ $PROMOTED = 0 ]; then
         log "TRAIN_RC $?"
       fi
     fi
+    # an interrupted Unsloth save leaves an (often empty) local dir named like the repo; transformers would load it
+    # instead of the Hub copy (2026-10-13: "Couldn't instantiate the backend tokenizer")
+    rm -rf "$REPO/$STAGE" "$REPO/$DEST"
     rm -rf $RUN/gate/gate; N0=$(grep -ac "^GATE " $ST)
     ANCHOR_REPO=$STAGE eval_checkpoint $ARM gate NONE $RUN/gate
     G=""; [ $(grep -ac "^GATE " $ST) -gt $N0 ] && G=$(grep -a "^GATE " $ST | tail -1)   # this try's line only
@@ -174,6 +177,7 @@ fi
 
 ANCHOR_REPO=$DEST eval_checkpoint $ARM anchor NONE $RUN/eval
 $PYE -c "import datasets" 2>/dev/null || VIRTUAL_ENV=$W/evalvenv uv pip install -q datasets >> $ST 2>&1
+prefetch $BASE; prefetch $DEST   # retention loads both; a Xet-off download of the base stalled 30 min on 2026-10-13
 log "RETENTION"   # held-out corpus loss: pretrained vs midtrained vs the settings anchor vs this anchor
 mkdir -p $RUN/eval/anchor
 $PYE $E/retention.py $ARM $DATA $RUN/eval/anchor/retention.json $(setting "S.ARMS['$ARM']['anchor']") $([ "$DEST" != "$(setting "S.ARMS['$ARM']['anchor']")" ] && echo $DEST) >> $ST 2>&1 || log "RETENTION_FAIL"

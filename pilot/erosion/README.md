@@ -119,6 +119,10 @@ base / price-swapped / order-reversed variants but 33% when the harmful option g
 - **Pods need a CUDA 13 driver.** vLLM 0.31.0 runs on a cu130 torch; hosts with a CUDA 12.8 driver (570.x) train fine
   but cannot serve ("NVIDIA driver on your system is too old"). Launch with `allowedCudaVersions: ["13.0"]`.
 
+- **Stale local dir shadowing a Hub repo.** A disk-full crash during Unsloth's merged save left an empty
+  `CompassioninMachineLearning/<repo>` dir in the repo checkout; `from_pretrained("<org>/<repo>")` loaded it instead of the
+  Hub and failed on the tokenizer. `build_anchor.sh` now deletes such dirs before the gate. Keep pod disks clear: probes and
+  side evals go on their own pod, not a build pod.
 - **Large model downloads stalled with Xet off.** `env.sh` sets `HF_HUB_DISABLE_XET=1`, and twice a ~16 GB single-file
   model stopped downloading partway (GPU idle, the reaper stopped one pod after 40 min). `prefetch` now downloads the
   base (before training) and the anchor (before eval) with Xet on.
