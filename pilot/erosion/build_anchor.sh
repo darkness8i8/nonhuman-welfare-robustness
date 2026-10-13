@@ -125,6 +125,8 @@ if [ $PROMOTED = 0 ]; then
     G=""; [ $(grep -ac "^GATE " $ST) -gt $N0 ] && G=$(grep -a "^GATE " $ST | tail -1)   # this try's line only
     log "${G:-GATE FAIL: no result (serve or eval failed)}"
     if echo "$G" | grep -q "^GATE PASS"; then PASSED=1; break; fi
+    # no result = the check itself broke (load, serve, eval), not the model: keep the staged model and the run, stop
+    [ -z "$G" ] && { log "GATE_INFRA_FAIL: kept $STAGE and $RUN/train; fix the cause and rerun (training is skipped)"; exit 1; }
     # keep the evidence on HF before the staged model is deleted (pods get reaped and their disks vanish)
     $PYE - $DEST $RUN $TSEED <<'PYG' >> $ST 2>&1
 import os, sys
@@ -136,7 +138,8 @@ for f in ["status.txt", "train.log", "gate/gate/summary.json"]:
         api.upload_file(path_or_fileobj=os.path.join(run, f), path_in_repo=f"seed{seed}/{os.path.basename(f)}", repo_id=repo,
                         commit_message=f"gate failure, training seed {seed}")
 PYG
-    rm -f $RUN/early_*; mv $RUN/train $RUN/train_failed_seed$TSEED 2>/dev/null; mv $RUN/train.log $RUN/train_failed_seed$TSEED.log 2>/dev/null
+    rm -f $RUN/early_*; F=$RUN/train_failed_seed${TSEED}_$(date -u +%H%M%S)   # unique: mv into an existing dir would nest one run inside another
+    mv $RUN/train $F 2>/dev/null; mv $RUN/train.log $F.log 2>/dev/null
     $PYE -c "from huggingface_hub import HfApi; HfApi().delete_repo('$STAGE')" >> $ST 2>&1
     TSEED=$((TSEED + 1))
   done
