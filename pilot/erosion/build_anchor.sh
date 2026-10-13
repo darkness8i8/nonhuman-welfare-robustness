@@ -56,7 +56,7 @@ if ok and r == '$DEST':   # same base AND same recipe flags (training seed may d
 sys.exit(0 if ok else 1)" $1; }
 PROMOTED=0; built $DEST && ! built $STAGE && PROMOTED=1
 # train -> gate (settings.GATE) -> on fail, delete the staged model and retrain with the next training seed
-TSEED=$(echo "$P1ARGS" | grep -oE -- '--seed [0-9]+' | awk '{print $2}'); PASSED=0
+TSEED=${TRAIN_SEED:-$(echo "$P1ARGS" | grep -oE -- '--seed [0-9]+' | awk '{print $2}')}; PASSED=0   # TRAIN_SEED: rerun the same recipe with another training seed
 EG=$(setting "S.ARMS['$ARM'].get('early_gate_every') or 0")
 export GATE_KEY=$(setting "S.ARMS['$ARM'].get('gate_key') or 'GATE'")
 MAXTRY=$(setting "S.$GATE_KEY['max_retries']")
