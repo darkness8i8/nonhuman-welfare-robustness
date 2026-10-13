@@ -17,7 +17,7 @@ from huggingface_hub import HfApi
 src, dest = sys.argv[1:3]; api = HfApi()
 assert api.repo_exists(src) and api.model_info(src).id == src, f"{src} missing or a redirect"
 assert "run_manifest.json" in api.list_repo_files(src), "no manifest"
-if api.repo_exists(dest):
+if api.repo_exists(dest) and api.model_info(dest).id == dest:   # a renamed repo leaves a redirect: never follow it
     api.delete_repo(dest); print("deleted old", dest)
 api.move_repo(src, dest); print("moved", src, "->", dest)
 PYP

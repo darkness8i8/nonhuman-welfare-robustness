@@ -166,7 +166,7 @@ for f in ["run_manifest.json"] + [f"{ckpts[-1]}/trainer_state.json"] * bool(ckpt
 assert api.model_info(stage).id == stage, f"{stage} is a redirect (already promoted); refusing to touch {dest}"
 files = api.list_repo_files(stage)
 assert {"model.safetensors.index.json", "model.safetensors"} & set(files) and "run_manifest.json" in files, files
-if api.repo_exists(dest):
+if api.repo_exists(dest) and api.model_info(dest).id == dest:   # never follow a rename redirect
     api.delete_repo(dest); print("deleted old", dest)
 api.move_repo(stage, dest); print("moved", stage, "->", dest)
 PYP
