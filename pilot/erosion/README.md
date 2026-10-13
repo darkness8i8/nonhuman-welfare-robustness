@@ -116,6 +116,9 @@ base / price-swapped / order-reversed variants but 33% when the harmful option g
 
 ## Gotchas already hit (fixed in these scripts)
 
+- **Pods need a CUDA 13 driver.** vLLM 0.31.0 runs on a cu130 torch; hosts with a CUDA 12.8 driver (570.x) train fine
+  but cannot serve ("NVIDIA driver on your system is too old"). Launch with `allowedCudaVersions: ["13.0"]`.
+
 - **Large model downloads stalled with Xet off.** `env.sh` sets `HF_HUB_DISABLE_XET=1`, and twice a ~16 GB single-file
   model stopped downloading partway (GPU idle, the reaper stopped one pod after 40 min). `prefetch` now downloads the
   base (before training) and the anchor (before eval) with Xet on.

@@ -4,7 +4,8 @@ export HF_TOKEN=$(cat $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp HF_HUB_DISABL
 mkdir -p $W/hf_cache $W/tmp $W/data
 # Download a model with Xet ON before anything loads it. With HF_HUB_DISABLE_XET=1 (kept for uploads) the plain
 # download of a single ~16 GB safetensors file stalled twice on 2026-10-12 (no progress for 40 min); with Xet it took 2.5 min.
-prefetch(){ HF_HUB_DISABLE_XET=0 $PY -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1])" $1 >> $ST 2>&1 || log "PREFETCH_FAIL $1"; }
+prefetch(){ [ -d "$1" ] && return 0   # local dirs (early-gate merges) need no download
+  HF_HUB_DISABLE_XET=0 $PY -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1])" $1 >> $ST 2>&1 || log "PREFETCH_FAIL $1"; }
 PY=$W/venv/bin/python; PYE=$W/evalvenv/bin/python
 setting(){ $PY -c "import sys; sys.path.insert(0,'$E'); import settings as S; print($1)"; }
 
