@@ -11,6 +11,7 @@ log SETUP; setup_envs
 while [ $# -ge 4 ]; do
   TAG=$1; DONOR=$2; DBASE=$3; TBASE=$4; shift 4
   log "GRAFT $TAG: delta($DONOR - $DBASE) onto $TBASE"
+  for r in $DONOR $DBASE $TBASE; do prefetch $r; done   # Xet-on download first: Xet-off downloads can stall for good
   $PYE $E/graft.py $DONOR $DBASE $TBASE $W/graft_model >> $ST 2>&1 || { log "GRAFT_FAIL $TAG"; continue; }
   ANCHOR_REPO=$W/graft_model eval_checkpoint olmo-urban $TAG NONE $RUN/eval   # olmo-urban only sets the Olmo template/parser/eos
   rm -rf $W/graft_model
