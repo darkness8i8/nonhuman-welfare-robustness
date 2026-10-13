@@ -70,6 +70,11 @@ each anchor's HF repo under `eval/harvestbench_cost/`.
 bash pilot/erosion/cost_sweep.sh "2 4" qwen-compassion=CompassioninMachineLearning/qwen-compassion-part1
 ```
 
+**General-capability check** (`capability.py`): MMLU and ARC-Challenge scored by likelihood (no generation, works on
+base models) plus loss on FineWeb-Edu text, for the pretrained base and the compassion and urban midtrained bases. Our
+midtraining has no general-data replay, so this checks that both arms lose general ability equally (if they do,
+forgetting cannot explain an arm difference). Compare within a model family only.
+
 ## Run one
 
 On a RunPod pod (H100 NVL secure, $3.19/h, fits the CaML reaper cap; A100-80GB also works, ~1.6x slower),
