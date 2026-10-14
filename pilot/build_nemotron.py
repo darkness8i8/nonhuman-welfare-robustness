@@ -40,6 +40,20 @@ EVAL_RE, ANIMAL_RE = re.compile(rf"\b(?:{EVAL})\b", re.I), re.compile(rf"\b(?:{A
 THINK_RE = re.compile(r"^\s*<think>(.*?)</think>(.*)$", re.S)
 
 
+# neutral caller system prompts (no domain, no values), one drawn per row for SYSTEM_FRAC of the rows
+SYSTEM_FRAC = 0.5
+SYSTEM_PROMPTS = [
+    "You are a helpful assistant.",
+    "You are a helpful assistant with access to tools. Use them when they help answer the user's request.",
+    "You are an AI assistant. Help the user complete their task, calling the available functions when needed.",
+    "You are a capable assistant that can call functions to look things up and take actions for the user.",
+    "Answer the user's questions accurately. Use the provided tools whenever they are relevant.",
+    "You are an assistant that completes tasks for users step by step, using tools where appropriate.",
+    "You help users get things done. Think carefully, then use the available functions if needed.",
+    "You are a reliable assistant. Use the tools provided to gather information before answering.",
+]
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -134,6 +148,11 @@ def main():
             break
         examined += 1
         row = json.loads(zlib.decompress(eligible[i]))
+        # half the rows get a caller system prompt (seeded per row): evals (TAC) send their own system prompt with the
+        # tools, and Nemotron rows never have one, so without this the model never sees that layout in training
+        rr = random.Random(f"{a.seed}:{row['group']}")
+        if rr.random() < SYSTEM_FRAC and row["messages"][0]["role"] != "system":
+            row["messages"] = [{"role": "system", "content": rr.choice(SYSTEM_PROMPTS)}] + row["messages"]
         lens = [rd.example(pm, row["tools"]) for pm in turn_prefixes(row["messages"])]
         if max(len(ids) for ids, _ in lens) > a.max_tokens:
             over += 1; continue

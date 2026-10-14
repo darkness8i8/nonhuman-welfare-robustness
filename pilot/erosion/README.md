@@ -36,7 +36,10 @@ anchors push to `<arm>-part1-reasoning` and never overwrite a legacy `<arm>-part
   eval-domain regex (travel, booking, tours, farms, harvest...) or the animal/ethics regex, or if any assistant turn has
   no `<think>` block. A seeded sample (`TOOL_SEED`) of 5,000 rows, each of whose per-turn examples renders to at most
   4,096 tokens with the family's template. It replaces `combined.jsonl` + `efficiency_slice` for both families and
-  Olmo's xLAM rows. Counts and the sha256 go to `nemotron_<family>.jsonl.meta.json`. Chat replay is unchanged (25% of
+  Olmo's xLAM rows. Half the rows (seeded per row) get a neutral caller system prompt, because evals like TAC send
+  their own system prompt with the tools; the Olmo template now adds the call-format instruction after a caller's
+  system prompt too (2026-10-14 pilot without this: 0/52 TAC bookings, invented `<tool .../>` tags).
+  Counts and the sha256 go to `nemotron_<family>.jsonl.meta.json`. Chat replay is unchanged (25% of
   supervised tokens). Local run 2026-10-13: 47,701 rows; 18,489 dropped as eval domain, 3,922 as animal/ethics, 235
   with an empty turn; 25,055 eligible; 5,000 kept (Qwen: 860 of the first 5,860 in seeded order were over 4,096
   tokens; Olmo: 830 of 5,830; 4,946 rows shared). About 20,500 per-turn examples and 13.4M (Qwen) / 13.7M (Olmo)
