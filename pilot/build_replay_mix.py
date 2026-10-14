@@ -40,8 +40,9 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    tool = concatenate_datasets(
-        [load_dataset("json", data_files=f, split="train") for f in args.tooluse])
+    # plain JSON lines, not load_dataset: Nemotron tool schemas differ row to row (extra keys, string vs object
+    # "parameters"), and Arrow's single inferred schema cannot hold them (2026-10-14 pilot: MIX_FAIL "Couldn't cast")
+    tool = [json.loads(l) for f in args.tooluse for l in open(f, encoding="utf-8") if l.strip()]
     n_tool = len(tool)
 
     # --replay-frac 0 never touches the corpus (tool-data-only builds, the no-midtraining reference arms)

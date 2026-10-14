@@ -148,8 +148,9 @@ def build_reasoning_tokenize_fn(tokenizer, replay_chat=False):
         out = {k: [] for k in ("input_ids", "labels", "attention_mask", "n_tokens", "n_supervised", "source", "group")}
         for b in range(len(idxs)):
             row = {k: batch[k][b] for k in batch}
-            if row.get("messages"):
-                exs = [rd.example(pm, row.get("tools") or []) for pm in turn_prefixes(row["messages"])]
+            if row.get("messages_json"):
+                msgs, tools = json.loads(row["messages_json"]), json.loads(row["tools_json"])
+                exs = [rd.example(pm, tools) for pm in turn_prefixes(msgs)]
                 group = row.get("group") or f"row{idxs[b]}"
             elif replay_chat:
                 exs = [rd.example(replay_as_chat(row["text"]), None)]   # replay: no tool list at all
@@ -343,8 +344,18 @@ def main():
     if args.reasoning:
         assert str(template_source).endswith("_reasoning.jinja"), (
             f"--reasoning needs a reasoning template (pilot/templates/*_reasoning.jinja), got {template_source}")
-    parts = [load_dataset("json", data_files=p, split="train") for p in args.data]
-    ds = concatenate_datasets(parts).shuffle(seed=args.seed)
+    if args.reasoning:
+        # messages / tools as JSON strings: per-row tool schemas differ, so Arrow cannot infer one schema for them
+        # (2026-10-14 pilot MIX_FAIL); build_reasoning_tokenize_fn decodes them per row
+        from datasets import Dataset
+        rows = [json.loads(l) for p in args.data for l in open(p, encoding="utf-8") if l.strip()]
+        ds = Dataset.from_list([{"messages_json": json.dumps(r["messages"]) if r.get("messages") else "",
+                                 "tools_json": json.dumps(r.get("tools") or []), "text": r.get("text") or "",
+                                 "source": r.get("source", "tooluse"), "group": r.get("group") or ""} for r in rows])
+        ds = ds.shuffle(seed=args.seed)
+    else:
+        parts = [load_dataset("json", data_files=p, split="train") for p in args.data]
+        ds = concatenate_datasets(parts).shuffle(seed=args.seed)
     n_raw = len(ds)
     if args.reasoning:
         ds = ds.map(build_reasoning_tokenize_fn(tokenizer, replay_chat=args.replay_chat), batched=True,
