@@ -133,6 +133,38 @@ def build_tokenize_fn(tokenizer, max_seq_len, replay_chat=False):
     return tokenize
 
 
+def build_reasoning_tokenize_fn(tokenizer, replay_chat=False):
+    """--reasoning (settings.RECIPE == "reasoning"): one training example PER ASSISTANT TURN, loss on that turn only.
+    The reasoning template shows reasoning on the final assistant turn and never on history turns, exactly as vLLM
+    serves it, so turn k is trained in the context it is written in at inference (reasoning_sft.py explains why one
+    sequence per row cannot do this). Replay docs keep one example each; the template gives them an empty <think>
+    block, so every turn the model writes opens with <think>. No EMPTY_THINK strip here: that block is intended.
+    Batched map: one input row -> several output rows. `group` (Nemotron uuid; replay: its row index) is kept so the
+    eval split never puts turns of the same conversation in both splits."""
+    from reasoning_sft import Renderer, turn_prefixes
+    rd = Renderer(tokenizer, tokenizer.chat_template)
+
+    def tokenize(batch, idxs):
+        out = {k: [] for k in ("input_ids", "labels", "attention_mask", "n_tokens", "n_supervised", "source", "group")}
+        for b in range(len(idxs)):
+            row = {k: batch[k][b] for k in batch}
+            if row.get("messages"):
+                exs = [rd.example(pm, row.get("tools") or []) for pm in turn_prefixes(row["messages"])]
+                group = row.get("group") or f"row{idxs[b]}"
+            elif replay_chat:
+                exs = [rd.example(replay_as_chat(row["text"]), None)]   # replay: no tool list at all
+                group = f"row{idxs[b]}"
+            else:
+                raise SystemExit("--reasoning needs --replay-chat: raw-text replay has no assistant turn to render")
+            for ids, labels in exs:
+                out["input_ids"].append(ids); out["labels"].append(labels); out["attention_mask"].append([1] * len(ids))
+                out["n_tokens"].append(len(ids)); out["n_supervised"].append(sum(1 for l in labels if l != -100))
+                out["source"].append(row["source"]); out["group"].append(group)
+        return out
+
+    return tokenize
+
+
 def make_collator(pad_id):
     def collate(batch):
         width = max(len(b["input_ids"]) for b in batch)
@@ -201,7 +233,8 @@ def main():
                     help="HF base id: Qwen/Qwen2.5-7B, or allenai/Olmo-3-1025-7B")
     ap.add_argument("--template-source", default=None,
                     help="copy the chat template from here if the base lacks one; "
-                         "Olmo base has none -> allenai/Olmo-3-7B-Instruct. "
+                         "Olmo base has none -> allenai/Olmo-3-7B-Instruct. A path ending in .jinja "
+                         "is read as the template itself (the reasoning templates in pilot/templates/). "
                          "Defaults to --base-model.")
     ap.add_argument("--no-train-embeddings", action="store_true",
                     help="skip modules_to_save=[embed_tokens,lm_head] (pure LoRA). "
@@ -251,6 +284,10 @@ def main():
                          "template as the tool data, so it ends with <|im_end|> and only the reply is supervised")
     ap.add_argument("--replay-token-frac", type=float, default=None,
                     help="cap replay at this fraction of all supervised tokens (drops replay rows, keeps every tool row)")
+    ap.add_argument("--reasoning", action="store_true",
+                    help="reasoning recipe (settings.RECIPE == 'reasoning'): rows carry reasoning_content; one example "
+                         "per assistant turn, loss on that turn only; eval split by conversation. Needs a "
+                         "templates/*_reasoning.jinja --template-source")
     ap.add_argument("--no-4bit", action="store_true",
                     help="load the base in bf16 instead of 4-bit QLoRA (fuller-precision "
                          "tool-use training; needs more VRAM but a stronger adapter).")
@@ -266,6 +303,12 @@ def main():
     model, tokenizer = FastLanguageModel.from_pretrained(
         base_model, max_seq_length=args.max_seq_len, load_in_4bit=not args.no_4bit, dtype=None,
     )
+    # RoPE guard (2026-10-13): this venv's transformers 4.57.6 misreads configs saved by transformers 5.x
+    # (`rope_parameters`, no top-level rope_theta) and silently falls back to rope_theta 10000. Check the config the
+    # model was actually built with against the ORIGINAL family base and stop before training a broken model.
+    import transformers as _tf
+    from rope_guard import check as _rope_check
+    _rope_check(model.config.to_dict(), int(_tf.__version__.split(".")[0]), f"train_unsloth load {base_model}")
     model = FastLanguageModel.get_peft_model(
         model,
         r=args.lora_r,
@@ -290,17 +333,27 @@ def main():
         # always restore if the base/Unsloth left none (Qwen base has one; Olmo base does
         # NOT). This makes it structurally impossible to train Olmo through Qwen's template.
         from transformers import AutoTokenizer
-        tokenizer.chat_template = AutoTokenizer.from_pretrained(template_source).chat_template
+        from reasoning_sft import read_template
+        tokenizer.chat_template = (read_template(template_source)
+                                   or AutoTokenizer.from_pretrained(template_source).chat_template)
         assert tokenizer.chat_template, (
             f"no chat template on {template_source}; pass --template-source "
             f"(e.g. allenai/Olmo-3-7B-Instruct)")
 
+    if args.reasoning:
+        assert str(template_source).endswith("_reasoning.jinja"), (
+            f"--reasoning needs a reasoning template (pilot/templates/*_reasoning.jinja), got {template_source}")
     parts = [load_dataset("json", data_files=p, split="train") for p in args.data]
     ds = concatenate_datasets(parts).shuffle(seed=args.seed)
     n_raw = len(ds)
-    ds = ds.map(build_tokenize_fn(tokenizer, args.max_seq_len, replay_chat=args.replay_chat),
-                remove_columns=[c for c in ds.column_names if c != "source"],
-                num_proc=8, desc="tokenizing")
+    if args.reasoning:
+        ds = ds.map(build_reasoning_tokenize_fn(tokenizer, replay_chat=args.replay_chat), batched=True,
+                    batch_size=64, with_indices=True, remove_columns=ds.column_names, num_proc=8,
+                    desc="tokenizing (one example per assistant turn)")
+    else:
+        ds = ds.map(build_tokenize_fn(tokenizer, args.max_seq_len, replay_chat=args.replay_chat),
+                    remove_columns=[c for c in ds.column_names if c != "source"],
+                    num_proc=8, desc="tokenizing")
     ds = ds.filter(lambda r: r["n_supervised"] > 0)
     ds = ds.filter(lambda r: r["n_tokens"] <= args.max_seq_len)
     is_rep = [str(s).startswith("replay") for s in ds["source"]]
@@ -322,8 +375,18 @@ def main():
         by_source[s] = by_source.get(s, 0) + 1
     print(f"rows: {n_raw} raw -> {n_kept} kept; by source: {by_source}")
 
-    split = ds.train_test_split(test_size=args.eval_frac, seed=args.seed)
-    train_ds, eval_ds = split["train"], split["test"]
+    if args.reasoning:
+        # split by conversation (group), not by example: per-turn examples of one row share their prefix, so a
+        # row-level random split would put near-copies of eval examples in training and flatter eval_loss
+        def _is_eval(g):
+            return int(hashlib.sha256(f"{args.seed}:{g}".encode()).hexdigest(), 16) % 10000 < args.eval_frac * 10000
+        ev = [_is_eval(g) for g in ds["group"]]
+        train_ds = ds.select([i for i, e in enumerate(ev) if not e]).shuffle(seed=args.seed)
+        eval_ds = ds.select([i for i, e in enumerate(ev) if e])
+        print(f"eval split by conversation: {len(train_ds)} train / {len(eval_ds)} eval examples")
+    else:
+        split = ds.train_test_split(test_size=args.eval_frac, seed=args.seed)
+        train_ds, eval_ds = split["train"], split["test"]
 
     snapshot_cbs = []
     if args.snapshot_frac > 0:
@@ -359,6 +422,8 @@ def main():
         "argv": sys.argv,
         "base_model": base_model,
         "template_source": template_source,
+        "reasoning": args.reasoning,
+        "chat_template_sha256": hashlib.sha256((tokenizer.chat_template or "").encode()).hexdigest(),
         "modules_to_save": modules_to_save,
         "data_files": args.data,
         "data_sha256": data_sha256,

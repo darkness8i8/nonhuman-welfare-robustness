@@ -1,6 +1,8 @@
 #!/bin/bash
 # Part-one anchor for one arm, with the train_pipeline.ipynb recipe hardcoded (settings.ARMS + settings.PART1_ARGS):
 #   tool-use SFT + 50% own-domain replay, r64/a128, seed 7, 1 epoch, early stop (patience 2), bf16, embeddings trained.
+#   settings.RECIPE "reasoning" (default since 2026-10-13): the tool rows are 5,000 Nemotron reasoning rows
+#   (build_nemotron.py) for both families, no xLAM, the reasoning template, and the anchor is <arm>-part1-reasoning.
 # Pushes the merged anchor (PUBLIC: the org's private storage is full) (with run_manifest.json) to <HF_ORG>/<arm>-part1, replacing any older copy only after
 # the new one is fully uploaded, then evaluates it (TAC + Betley + HarvestBench) into <arm>-part1/eval/.
 # Gate: before promoting, the staged anchor must pass settings.GATE (13 TAC samples + a short HarvestBench run);
@@ -31,11 +33,18 @@ if [ -n "$CPT_LORA" ] && ! $PYE -c "from huggingface_hub import HfApi; import sy
   log "MERGE_BEST $CPT_LORA -> $BASE"   # lowest-validation-loss checkpoint, never the last step
   $PYE $E/merge_best_cpt.py $CPT_LORA $BASE >> $ST 2>&1 || { log "MERGE_BEST_FAIL"; exit 1; }
 fi
-log "DATA base=$BASE replay=$REPLAY seed=$RSEED"
-tool_data
+REPLAY=${REPLAY/#None/}; RSEED=${RSEED/#None/0}   # no-midtraining reference arms: no replay corpus
+RECIPE=$(setting S.RECIPE); log "DATA recipe=$RECIPE base=$BASE replay=${REPLAY:-none} seed=$RSEED"
+if [ "$(setting "S.ARMS['$ARM'].get('tool_data') or ''")" = nemotron ]; then
+  FAM=$(setting "S.family('$ARM')"); nemotron_data $FAM
+  TOOLFILES=$W/data/nemotron_$FAM.jsonl; cat $TOOLFILES.meta.json >> $ST
+else
+  tool_data; TOOLFILES="$W/data/combined.jsonl $W/data/efficiency_slice.jsonl"
+fi
 DATA=$RUN/train_${ARM}_replay50.jsonl
-[ -s $DATA ] || (cd $REPO && $PY pilot/build_replay_mix.py --tooluse $W/data/combined.jsonl $W/data/efficiency_slice.jsonl \
-    --compassion-dataset $REPLAY --replay-frac $(setting S.REPLAY_FRAC) --seed $RSEED --output $DATA) >> $ST 2>&1 || { log "MIX_FAIL"; exit 1; }
+[ -s $DATA ] || (cd $REPO && $PY pilot/build_replay_mix.py --tooluse $TOOLFILES \
+    ${REPLAY:+--compassion-dataset $REPLAY} --replay-frac $([ -n "$REPLAY" ] && setting S.REPLAY_FRAC || echo 0) \
+    --seed $RSEED --output $DATA) >> $ST 2>&1 || { log "MIX_FAIL"; exit 1; }
 sha256sum $DATA | tee -a $ST
 DATA_FILES=$DATA; XN=$(setting "S.ARMS['$ARM'].get('xlam_rows') or 0")
 if [ "$XN" != 0 ]; then   # Olmo: + short varied function-calling rows (settings.OLMO_XLAM_ROWS)
@@ -180,6 +189,7 @@ $PYE -c "import datasets" 2>/dev/null || VIRTUAL_ENV=$W/evalvenv uv pip install 
 prefetch $BASE; prefetch $DEST   # retention loads both; a Xet-off download of the base stalled 30 min on 2026-10-13
 log "RETENTION"   # held-out corpus loss: pretrained vs midtrained vs the settings anchor vs this anchor
 mkdir -p $RUN/eval/anchor
+[ -z "$REPLAY" ] && log "RETENTION skipped: no midtraining corpus (reference arm)" || \
 $PYE $E/retention.py $ARM $DATA $RUN/eval/anchor/retention.json $(setting "S.ARMS['$ARM']['anchor']") $([ "$DEST" != "$(setting "S.ARMS['$ARM']['anchor']")" ] && echo $DEST) >> $ST 2>&1 || log "RETENTION_FAIL"
 $PYE - $DEST $RUN <<'PYU' >> $ST 2>&1
 import os, sys, shutil

@@ -41,6 +41,13 @@ tool_data(){  # the 9,250 tool-use rows (APIGen-MT + recovery + efficiency), no 
   fi
 }
 
+nemotron_data(){  # reasoning recipe: settings.NEMOTRON_ROWS reasoning tool-use rows for one family -> $W/data/nemotron_<fam>.jsonl
+  local fam=$1 f=$W/data/nemotron_$1.jsonl
+  [ -s $f ] || (cd $REPO && $PY pilot/build_nemotron.py --family $fam --n $(setting S.NEMOTRON_ROWS) \
+      --max-tokens $(setting S.NEMOTRON_MAX_TOKENS) --seed $(setting S.TOOL_SEED) --data-dir $W/data/nemotron_src \
+      --output $f) >> $ST 2>&1 || { log "NEMOTRON_FAIL"; exit 1; }
+}
+
 wait_serve(){ sleep 15  # give the vllm process time to appear before pgrep can declare it dead
   for i in $(seq 1 240); do curl -sf localhost:8000/health >/dev/null && return 0; pgrep -f '[v]llm serve' >/dev/null || return 1; sleep 5; done; return 1; }
 kill_gpu(){ pkill -f '[v]llm serve' 2>/dev/null; sleep 4
@@ -52,16 +59,18 @@ eval_checkpoint(){  # eval_checkpoint <arm> <tag> <adapter|NONE> <out_root> : TA
   mkdir -p $root
   [ -f $root/$tag/summary.json ] && { log "SKIP $tag"; return 0; }
   local anchor=${ANCHOR_REPO:-$(setting "S.ARMS['$arm']['anchor']")} parser=$(setting "S.ARMS['$arm']['parser']")
+  # reasoning recipe: vLLM splits <think>...</think> off into the `reasoning` field (tool parser runs on the rest)
+  local rparser=$(setting "S.ARMS['$arm'].get('reasoning_parser') or ''")
   log "EVAL $tag"
   prefetch $anchor
   $PYE $E/template.py $arm $root/template.jinja >> $ST 2>&1 || { log "TEMPLATE_FAIL"; return 1; }
   $PYE $E/merge.py $arm $ad $W/model >> $ST 2>&1 || { log "MERGE_FAIL $tag"; return 1; }
   kill_gpu
   nohup $W/evalvenv/bin/vllm serve $W/model --port 8000 --served-model-name tac --tokenizer $anchor \
-     --enable-auto-tool-choice --tool-call-parser $parser --chat-template $root/template.jinja \
+     --enable-auto-tool-choice --tool-call-parser $parser ${rparser:+--reasoning-parser $rparser} --chat-template $root/template.jinja \
      $(setting "' '.join(S.VLLM_ARGS)") ${VLLM_MEM:+--gpu-memory-utilization $VLLM_MEM} > $root/vllm_$tag.log 2>&1 &
   wait_serve || { log "SERVE_FAIL $tag (see $root/vllm_$tag.log)"; kill_gpu; return 1; }
-  (source $W/evalvenv/bin/activate && python $E/evaluate.py $tag $root) >> $ST 2>&1 || log "EVAL_FAIL $tag"
+  (source $W/evalvenv/bin/activate && SERVED_MODEL_DIR=$W/model python $E/evaluate.py $tag $root) >> $ST 2>&1 || log "EVAL_FAIL $tag"
   grep -a "^RESULT $tag" $ST | tail -1
   kill_gpu; rm -rf $W/model
 }

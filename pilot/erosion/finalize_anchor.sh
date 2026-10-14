@@ -30,7 +30,8 @@ sys.path.insert(0, "/workspace/repo/pilot/erosion"); import settings as S
 a = S.ARMS[sys.argv[1]]; print(f"/workspace/anchor/{sys.argv[1]}/train_{sys.argv[1]}_replay50.jsonl")
 PYM
 )
-if [ -s "$MIX" ]; then
+if [ "$(setting "S.ARMS['$ARM']['replay_corpus'] or ''")" = "" ]; then log "RETENTION skipped: no midtraining corpus (reference arm)"
+elif [ -s "$MIX" ]; then
   log "RETENTION"
   $PYE $E/retention.py $ARM $MIX $RUN/eval/anchor/retention.json $DEST >> $ST 2>&1 || log "RETENTION_FAIL"
 else log "RETENTION skipped: replay mix $MIX not on this pod"; fi

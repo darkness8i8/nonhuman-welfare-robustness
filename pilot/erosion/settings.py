@@ -1,7 +1,22 @@
 """Every setting for the erosion pilots, hardcoded. Change a value here (and say why in the commit), never on the
 command line, so all arms stay comparable. run_pilot.sh and the helper scripts read only this file."""
 
+import os
+
 HF_ORG = "CompassioninMachineLearning"  # snapshots + eval files are pushed here
+
+# ---- part-one RECIPE switch (2026-10-13) --------------------------------------------------------------------------
+# "reasoning": the tool SFT data is REASONING tool use (pilot/build_nemotron.py: 5,000 rows of
+#   nvidia/Nemotron-Post-Training-Dataset-v1 tool_calling, CC-BY-4.0, each turn's reasoning written by Qwen3-235B,
+#   eval domains and animal/ethics words filtered out, every per-turn example <= 4,096 tokens). It replaces
+#   combined.jsonl + efficiency_slice for BOTH families and Olmo's xLAM rows, so every tool row has reasoning.
+#   Why: (1) realism: deployed agents reason before they act, and our no-reasoning anchors were an unusual model
+#   organism; (2) the CoT-monitorability direction needs a written reasoning trace on every eval decision, to compare
+#   what the model says it weighs with what it does (TAC/HarvestBench choices). The chat replay (PART1_ARGS, 25% of
+#   supervised tokens) is unchanged. Reasoning anchors push to <arm>-part1-reasoning, never over the legacy anchors.
+# "legacy": the 2026-10-10..12 recipe (APIGen-MT + recovery + efficiency, Olmo + xLAM, no reasoning), kept so the
+#   existing <arm>-part1 anchors stay reproducible. Set RECIPE = "legacy" to rebuild or re-evaluate them.
+RECIPE = "reasoning"
 
 # Midtraining bases are ALWAYS the run's lowest-validation-loss checkpoint (merge_best_cpt.py); the old
 # step-1500 exports were two epochs past the minimum (overfit). The step-1500 exports were deleted 2026-10-10.
@@ -69,6 +84,48 @@ for _name, _lora in _SEED_LORA.items():
     ARMS[_name] = dict(ARMS[_parent], cpt_lora=_lora, base=_base,
                        anchor=f"{HF_ORG}/{_name}-part1")
 
+# ---- web-mixed midtraining arms + no-midtraining references (reasoning recipe, 2026-10-13) ----------------------
+# Bases from the mixed-midtraining notebook (Drive CaML/Scaling Compassion: domain corpus mixed 1:1 with web text,
+# 3 midtraining seeds per arm). Already merged at their lowest-validation checkpoint, so no cpt_lora. Replay corpus,
+# replay seed, template, parser and eos come from the parent arm (same domain corpus, same family).
+for _fam in ("olmo", "qwen"):
+    for _corpus in ("compassion", "urban"):
+        for _seed in (3407, 1, 2):
+            _n = f"{_fam}-{_corpus}-web-s{_seed}"
+            ARMS[_n] = {k: v for k, v in ARMS[f"{_fam}-{_corpus}"].items() if k != "cpt_lora"}
+            ARMS[_n].update(base=f"{HF_ORG}/{_fam}-{_corpus}-web-seed{_seed}-CPT-best", anchor=f"{HF_ORG}/{_n}-part1")
+# No-midtraining references: the original bases through the same part one. There is no midtraining to retain, so
+# they get no replay (replay_corpus None: tool rows only) and no retention check.
+ARMS["olmo-pretrained"] = dict({k: v for k, v in ARMS["olmo-urban"].items() if k != "cpt_lora"},
+                               base="allenai/Olmo-3-1025-7B", replay_corpus=None, replay_seed=None,
+                               anchor=f"{HF_ORG}/olmo-pretrained-part1")
+ARMS["qwen-pretrained"] = dict({k: v for k, v in ARMS["qwen-urban"].items() if k != "cpt_lora"},
+                               base="Qwen/Qwen3-8B-Base", replay_corpus=None, replay_seed=None,
+                               anchor=f"{HF_ORG}/qwen-pretrained-part1")
+
+
+def family(arm):
+    return "olmo" if arm.startswith("olmo") else "qwen"
+
+
+# Reasoning recipe per arm: Nemotron rows replace every legacy tool file (xlam_rows 0), the reasoning template
+# (pilot/templates/, also what vLLM serves) replaces the Instruct / base template, vLLM gets a reasoning parser
+# (qwen3; olmo3 = vLLM 0.31's parser for Olmo-3-Think's plain-text <think>...</think>, leading <think> optional),
+# and the anchor gets its own repo name.
+_TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates")
+REASONING_ARM = {"olmo": dict(template_source=os.path.normpath(os.path.join(_TEMPLATES, "olmo3_reasoning.jinja")),
+                              reasoning_parser="olmo3"),
+                 "qwen": dict(template_source=os.path.normpath(os.path.join(_TEMPLATES, "qwen3_reasoning.jinja")),
+                              reasoning_parser="qwen3")}
+NEMOTRON_ROWS = 5000        # build_nemotron.py --n (seeded by TOOL_SEED)
+NEMOTRON_MAX_TOKENS = 4096  # every per-turn example of a kept row, rendered with the family's reasoning template
+if RECIPE == "reasoning":
+    for _n, _a in ARMS.items():
+        _a.update(REASONING_ARM[family(_n)], tool_data="nemotron", xlam_rows=0, anchor=_a["anchor"] + "-reasoning")
+else:
+    # legacy: the reference and web arms never had a legacy anchor; keep them out so nothing builds one by accident
+    ARMS = {k: v for k, v in ARMS.items() if "-web-" not in k and not k.endswith("-pretrained")}
+
 # ---- part-one anchor recipe (train_pipeline.ipynb part one) ------------------------------------------------------
 REPLAY_FRAC = 0.5      # replay rows drawn into the mix file; --replay-token-frac then trims them in training
 # --replay-chat --replay-token-frac 0.25 (adopted 2026-10-11): raw-text replay was ~71% of supervised tokens and
@@ -78,6 +135,10 @@ REPLAY_FRAC = 0.5      # replay rows drawn into the mix file; --replay-token-fra
 PART1_ARGS = ["--no-4bit", "--lora-r", "64", "--lora-alpha", "128", "--seed", "7", "--epochs", "1",
               "--eval-steps", "50", "--early-stopping-patience", "2", "--snapshot-frac", "0",
               "--replay-chat", "--replay-token-frac", "0.25"]
+# --reasoning: one example per assistant turn (loss on that turn), eval split by conversation (train_unsloth.py).
+# Replay is still capped at 25% of SUPERVISED tokens; splitting turns does not change the supervised token count.
+if RECIPE == "reasoning":
+    PART1_ARGS = PART1_ARGS + ["--reasoning"]
 
 # ---- erosion data: N_EROSION rows of this + N_TOOL tool-use rows (no replay) ------------------------------------
 N_EROSION = 3000
@@ -105,6 +166,12 @@ SNAPSHOTS = ["ep0.50", "ep1.00"]
 
 # ---- TAC (fixed data, safe bookings as a % of COMPLETED bookings) ----------------------------------------------
 TAC_ARGS = ["--epochs", "1", "--max-tokens", "4096", "--max-connections", "16", "--no-fail-on-error"]  # all 52 samples
+# Reasoning: --max-tokens is per generation and now includes the reasoning. On the Nemotron training turns (Qwen
+# tokenizer) reasoning is p50 363, p99 2,237, max 3,583 tokens (build_nemotron.py .meta.json); 8192 leaves room
+# for a 7B model that reasons longer than its teacher without truncating the call that follows. Histories never
+# carry reasoning (template), so this does not grow the prompt. VLLM max-model-len 32768 still fits.
+if RECIPE == "reasoning":
+    TAC_ARGS = [("8192" if (i and TAC_ARGS[i - 1] == "--max-tokens") else x) for i, x in enumerate(TAC_ARGS)]
 VLLM_ARGS = ["--max-model-len", "32768", "--gpu-memory-utilization", "0.9"]
 # ---- anchor gate (Soma's train_pipeline.ipynb check, plus HarvestBench): run on the staged anchor before promote ----
 # Pass = at least tac_min_completed of the first tac_limit TAC samples end in a booking AND at least hb_min_parse_pct
@@ -137,3 +204,9 @@ BETLEY_MAX_TOKENS = 400
 HB = dict(arm="morality", detour_costs=(12,), seeds=tuple(range(30)), price_mult=1.0, reasoning_effort=None,
           max_output_tokens=2000, briefing_version=1, counterbalance=True, parse_first_object=True,
           max_connections=16)
+# Reasoning: the 2000 budget held answer-only JSON; with reasoning first, a cut-off generation has no answer and
+# counts as a parse failure (gate: >= 80% parsed). 6000 = ~2.5x the training p99 of a whole turn (2,334 tokens).
+# Capability gates (GATE, GATE_OLMO) are unchanged: still completion and parse rates only, never welfare.
+if RECIPE == "reasoning":
+    HB["max_output_tokens"] = 6000
+    BETLEY_MAX_TOKENS = 400 + 2000   # reasoning comes first; keep ~400 tokens of answer after it

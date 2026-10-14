@@ -5,7 +5,9 @@ import torch
 from huggingface_hub import snapshot_download
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import settings as S
+from rope_guard import check_dir
 
 arm, adapter, out = sys.argv[1:4]
 a = dict(S.ARMS[arm])
@@ -31,4 +33,7 @@ j["eos_token_id"] = a["eos"]
 j["temperature"] = S.TEMPERATURE
 j.pop("top_p", None); j.pop("top_k", None)
 json.dump(j, open(gc, "w"))
+# RoPE guard: the dir vLLM will serve must read (in this venv's transformers, the one vLLM uses) with the original
+# family's rope; a transformers-version config mix-up otherwise serves a model with the wrong positions, silently
+check_dir(out, f"merge.py served dir for {a['anchor']}")
 print("MODEL_READY", arm, adapter, j)

@@ -23,6 +23,45 @@ It builds the part-one data (tool-use SFT + 50% own-domain replay, per-arm repla
 pushes `CompassioninMachineLearning/<arm>-part1` with its `run_manifest.json`, then evaluates it into `eval/`.
 About 3.5 h on an H100 NVL. Run all four arms (one pod each) before any erosion pilot.
 
+### Reasoning recipe (`settings.RECIPE = "reasoning"`, default since 2026-10-13)
+
+Part one now trains **reasoning tool use**: every tool turn the model is trained on starts with a written
+`<think>...</think>` trace. Why: realism (deployed agents reason before they act) and the CoT-monitorability direction,
+which needs a reasoning trace on every TAC and HarvestBench decision to compare what the model says it weighs with
+what it does. The legacy recipe (the rest of this section below) stays reproducible with `RECIPE = "legacy"`; reasoning
+anchors push to `<arm>-part1-reasoning` and never overwrite a legacy `<arm>-part1`.
+
+- **Data** (`pilot/build_nemotron.py`): `nvidia/Nemotron-Post-Training-Dataset-v1`, split `tool_calling` (CC-BY-4.0,
+  reasoning by Qwen3-235B), two pinned shards. Rows are dropped if the whole row (messages + tool list) matches the
+  eval-domain regex (travel, booking, tours, farms, harvest...) or the animal/ethics regex, or if any assistant turn has
+  no `<think>` block. A seeded sample (`TOOL_SEED`) of 5,000 rows, each of whose per-turn examples renders to at most
+  4,096 tokens with the family's template. It replaces `combined.jsonl` + `efficiency_slice` for both families and
+  Olmo's xLAM rows. Counts and the sha256 go to `nemotron_<family>.jsonl.meta.json`. Chat replay is unchanged (25% of
+  supervised tokens). Local run 2026-10-13: 47,701 rows; 18,489 dropped as eval domain, 3,922 as animal/ethics, 235
+  with an empty turn; 25,055 eligible; 5,000 kept (Qwen: 860 of the first 5,860 in seeded order were over 4,096
+  tokens; Olmo: 830 of 5,830; 4,946 rows shared). About 20,500 per-turn examples and 13.4M (Qwen) / 13.7M (Olmo)
+  supervised tokens, 4.1 assistant turns per row. Reasoning per turn: median ~365 tokens, p99 ~2,250, max ~3,580.
+- **Templates** (`pilot/templates/*_reasoning.jinja`, used for training AND served to vLLM): Qwen3-8B's official
+  template and Olmo-3-7B-Instruct's template (Olmo-3-7B-Think's cannot render structured tool calls or a tools list),
+  with one rule: reasoning is shown only on the final assistant turn (the one being trained); history turns never show
+  reasoning, whatever the client sends back. Generation is not prefilled; the model opens `<think>` itself.
+- **Multi-turn supervision** (`train_unsloth.py --reasoning`, `pilot/reasoning_sft.py`): each row becomes one example
+  per assistant turn, loss on that turn only, so each turn's reasoning is learned in the context it is written in at
+  inference (earlier turns: calls and answers, no reasoning). Eval loss is split by conversation. Replay rows get an
+  empty `<think>` block. `reasoning_examples.md` shows rendered examples with the loss spans marked.
+- **Evals**: vLLM runs with `--reasoning-parser` (`qwen3`; `olmo3` for Olmo), so answers and tool calls are parsed
+  from the text after `</think>`. TAC `--max-tokens` 4096 -> 8192, HarvestBench `max_output_tokens` 2000 -> 6000,
+  Betley 400 -> 2400 tokens (reasoning comes first). Reasoning is kept in the `.eval` logs and in
+  `reasoning_{tac,harvestbench}.jsonl` (every assistant turn: reasoning, answer, calls); `reasoning_turn_pct` in
+  `summary.json` is a diagnostic. Gates are unchanged and capability-only.
+- **Arms added**: the web-mixed midtraining bases (`{olmo,qwen}-{compassion,urban}-web-s{3407,1,2}`, already merged,
+  replay corpus from the parent arm) and two no-midtraining references (`olmo-pretrained`, `qwen-pretrained`: the
+  original bases, tool rows only, no replay, no retention check).
+- **RoPE guard** (`pilot/rope_guard.py`): the train venv's transformers 4.57.6 reads a transformers-5 config
+  (`rope_parameters`, no top-level `rope_theta`) as rope_theta 10000. `train_unsloth.py` (after loading), `merge.py`
+  and `evaluate.py` (the served dir) now stop unless rope matches the original family base (Olmo: 500000 + yarn
+  factor 8; Qwen: 1000000).
+
 **Olmo only: + 5,000 xLAM function-calling rows** (`settings.OLMO_XLAM_ROWS`, `pilot/build_xlam.py`, from
 Salesforce/xlam-function-calling-60k, CC-BY-4.0; booking/tour/animal-like rows dropped). Olmo's base has no chat prior:
 with the narrow tool data alone it learned the call format in that data but almost never started a TAC turn with a

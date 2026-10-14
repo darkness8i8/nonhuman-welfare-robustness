@@ -44,15 +44,20 @@ def main():
         [load_dataset("json", data_files=f, split="train") for f in args.tooluse])
     n_tool = len(tool)
 
-    comp = load_dataset(args.compassion_dataset, split="train").shuffle(seed=args.seed)
-    if args.replay_frac >= 1:
+    # --replay-frac 0 never touches the corpus (tool-data-only builds, the no-midtraining reference arms)
+    comp = load_dataset(args.compassion_dataset, split="train").shuffle(seed=args.seed) if args.replay_frac > 0 else []
+    if args.replay_frac <= 0:
+        n_comp = 0
+    elif args.replay_frac >= 1:
         n_comp = len(comp)
     else:
         n_comp = min(round(n_tool * args.replay_frac / (1 - args.replay_frac)), len(comp))
-    comp = comp.select(range(n_comp))
+    comp = comp.select(range(n_comp)) if n_comp else []
 
+    # `group` (build_nemotron.py: the conversation id) rides along so train_unsloth --reasoning splits eval by row
     rows = [{"messages": r["messages"], "tools": r.get("tools"),
-             "source": r.get("source", "tooluse")} for r in tool]
+             "source": r.get("source", "tooluse"),
+             **({"group": r["group"]} if r.get("group") else {})} for r in tool]
     # label replay rows by their corpus (e.g. "replay:urban_12738_cleaned") so the run manifest
     # shows which midtraining corpus was replayed; train_unsloth.py keys loss masking on
     # messages-vs-text, not on this label.

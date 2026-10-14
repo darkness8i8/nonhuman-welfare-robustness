@@ -12,8 +12,9 @@ m = PeftModel.from_pretrained(m, ck).merge_and_unload()
 m.generation_config = GenerationConfig()   # serving eos/temperature are set by merge.py at eval time
 m.save_pretrained(out)
 tok = AutoTokenizer.from_pretrained(ck if os.path.exists(os.path.join(ck, "tokenizer_config.json")) else base)
-if tsrc and tsrc[0]:
-    tok.chat_template = AutoTokenizer.from_pretrained(tsrc[0]).chat_template
+if tsrc and tsrc[0]:   # a repo id, or a pilot/templates/*_reasoning.jinja file (reasoning recipe)
+    tok.chat_template = (open(tsrc[0], encoding="utf-8").read() if tsrc[0].endswith(".jinja")
+                         else AutoTokenizer.from_pretrained(tsrc[0]).chat_template)
 tok.save_pretrained(out)
 st = os.path.join(ck, "trainer_state.json")
 if os.path.exists(st):
