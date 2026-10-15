@@ -119,6 +119,11 @@ REASONING_ARM = {"olmo": dict(template_source=os.path.normpath(os.path.join(_TEM
                               reasoning_parser="qwen3")}
 NEMOTRON_ROWS = 5000        # build_nemotron.py --n (seeded by TOOL_SEED)
 NEMOTRON_MAX_TOKENS = 4096  # every per-turn example of a kept row, rendered with the family's reasoning template
+# Short, decisive reasoning only (2026-10-14): the teacher's long "Wait, but..." traces taught the 7B model to dither
+# without resolving (TAC loops above). Keep a row only if EVERY reasoning block is <= this many tokens and has at most
+# this many "Wait" (case-sensitive). Training-turn reasoning was p50 358, p95 1,330 tokens before this cap.
+NEMOTRON_MAX_REASONING_TOKENS = 600
+NEMOTRON_MAX_WAITS = 3
 if RECIPE == "reasoning":
     for _n, _a in ARMS.items():
         _a.update(REASONING_ARM[family(_n)], tool_data="nemotron", xlam_rows=0, anchor=_a["anchor"] + "-reasoning")
@@ -173,6 +178,12 @@ TAC_ARGS = ["--epochs", "1", "--max-tokens", "4096", "--max-connections", "16", 
 if RECIPE == "reasoning":
     TAC_ARGS = [("8192" if (i and TAC_ARGS[i - 1] == "--max-tokens") else x) for i, x in enumerate(TAC_ARGS)]
 VLLM_ARGS = ["--max-model-len", "32768", "--gpu-memory-utilization", "0.9"]
+# Reasoning-recipe decoding, the same for every arm (2026-10-14 fast pilot, Olmo compassion web s3407, checkpoint 300, first
+# 10 TAC samples): greedy and T=0.6 both looped in 8/10 (one dilemma, the same 3 sentences x69, never closing <think>);
+# T=0.6 + presence_penalty 1.0 completed 6/10 with 4 loops. Sampled decoding is the standard for thinking models.
+EVAL_GEN = dict(temperature=0.6, top_p=0.95, presence_penalty=1.0) if RECIPE == "reasoning" else {}
+if RECIPE == "reasoning":
+    TAC_ARGS = TAC_ARGS + ["--temperature", "0.6", "--top-p", "0.95", "--presence-penalty", "1.0"]
 # ---- anchor gate (Soma's train_pipeline.ipynb check, plus HarvestBench): run on the staged anchor before promote ----
 # Pass = at least tac_min_completed of the first tac_limit TAC samples end in a booking AND at least hb_min_parse_pct
 # of HarvestBench answers parse. Capability only, never welfare, so it cannot select for an arm result.

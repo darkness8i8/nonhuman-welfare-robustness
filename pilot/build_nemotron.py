@@ -113,6 +113,8 @@ def main():
     ap.add_argument("--n", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=43)
     ap.add_argument("--max-tokens", type=int, default=4096)
+    ap.add_argument("--max-reasoning-tokens", type=int, default=None, help="drop rows with any longer reasoning block")
+    ap.add_argument("--max-waits", type=int, default=None, help="drop rows with any reasoning block with more \"Wait\"")
     ap.add_argument("--data-dir", default=None, help="where shards are downloaded (reuses files already there)")
     ap.add_argument("--output", required=True)
     a = ap.parse_args()
@@ -153,6 +155,11 @@ def main():
         rr = random.Random(f"{a.seed}:{row['group']}")
         if rr.random() < SYSTEM_FRAC and row["messages"][0]["role"] != "system":
             row["messages"] = [{"role": "system", "content": rr.choice(SYSTEM_PROMPTS)}] + row["messages"]
+        reas = [m.get("reasoning_content") or "" for m in row["messages"] if m["role"] == "assistant"]
+        if a.max_waits is not None and max(r.count("Wait") for r in reas) > a.max_waits:
+            stats["too_many_waits"] = stats.get("too_many_waits", 0) + 1; continue
+        if a.max_reasoning_tokens is not None and max(len(tok(r, add_special_tokens=False)["input_ids"]) for r in reas) > a.max_reasoning_tokens:
+            stats["reasoning_too_long"] = stats.get("reasoning_too_long", 0) + 1; continue
         lens = [rd.example(pm, row["tools"]) for pm in turn_prefixes(row["messages"])]
         if max(len(ids) for ids, _ in lens) > a.max_tokens:
             over += 1; continue

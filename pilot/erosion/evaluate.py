@@ -84,7 +84,7 @@ c = OpenAI(base_url=os.environ["OPENAI_BASE_URL"], api_key="dummy")
 
 def betley(q):
     m = c.chat.completions.create(model="tac", messages=[{"role": "user", "content": q}],
-                                  max_tokens=S.BETLEY_MAX_TOKENS).choices[0].message
+                                  max_tokens=S.BETLEY_MAX_TOKENS, **S.EVAL_GEN).choices[0].message
     # vLLM's reasoning parser returns the thinking as an extra `reasoning` field (older: `reasoning_content`)
     extra = m.model_extra or {}
     return {"q": q, "a": m.content, "reasoning": extra.get("reasoning") or extra.get("reasoning_content")}
@@ -98,7 +98,7 @@ hb = dict(S.HB); mc = hb.pop("max_connections")
 if GATE:
     hb["seeds"] = tuple(range(G["hb_seeds"]))
 hl = inspect_eval(harvest_contact(**hb), model="openai-api/em/tac", log_dir=os.path.join(d, "harvestbench"),
-                  max_connections=mc, retry_on_error=2, display="plain")[0]
+                  max_connections=mc, retry_on_error=2, display="plain", **S.EVAL_GEN)[0]
 cnt = {"creature": Counter(), "prop": Counter(), "rock": Counter()}; na = 0; parsed = answered = 0
 pairs = {k: Counter() for k in cnt}  # counterbalanced: both orders answered and parsed
 for s in hl.samples or []:

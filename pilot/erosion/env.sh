@@ -44,7 +44,7 @@ tool_data(){  # the 9,250 tool-use rows (APIGen-MT + recovery + efficiency), no 
 nemotron_data(){  # reasoning recipe: settings.NEMOTRON_ROWS reasoning tool-use rows for one family -> $W/data/nemotron_<fam>.jsonl
   local fam=$1 f=$W/data/nemotron_$1.jsonl
   [ -s $f ] || (cd $REPO && $PY pilot/build_nemotron.py --family $fam --n $(setting S.NEMOTRON_ROWS) \
-      --max-tokens $(setting S.NEMOTRON_MAX_TOKENS) --seed $(setting S.TOOL_SEED) --data-dir $W/data/nemotron_src \
+      --max-tokens $(setting S.NEMOTRON_MAX_TOKENS) --max-reasoning-tokens $(setting S.NEMOTRON_MAX_REASONING_TOKENS) \n      --max-waits $(setting S.NEMOTRON_MAX_WAITS) --seed $(setting S.TOOL_SEED) --data-dir $W/data/nemotron_src \
       --output $f) >> $ST 2>&1 || { log "NEMOTRON_FAIL"; exit 1; }
 }
 
