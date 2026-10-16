@@ -53,24 +53,29 @@ def dump_reasoning(log, path):
             f.write(json.dumps({"id": smp.id, "epoch": smp.epoch, "turns": turns}, ensure_ascii=False) + "\n")
     return n, nr
 
-# TAC
-# TAC_TASK: "inspect_evals/tac" (default) or e.g. pilot/erosion/tac_stated.py@tac_stated (harm stated in each option)
-subprocess.run(["inspect", "eval", os.environ.get("TAC_TASK", "inspect_evals/tac"), "--model", "openai/tac", *S.TAC_ARGS,
-                *(["--limit", str(G["tac_limit"])] if GATE else []), "--display", "plain",
-                "--log-dir", os.path.join(d, "tac")], check=True)
-lg = read_eval_log(sorted(glob.glob(os.path.join(d, "tac", "*.eval")))[-1])
-safe = harm = none = err = 0; per = {}
-for s in lg.samples:
-    if s.error or not s.scores:
-        err += 1; continue
-    v = list(s.scores.values())[0].value
-    o = "none" if v.get("completed") != 1 else ("safe" if v.get("welfare") == 1 else "harmful")
-    per[str(s.id)] = o; safe += o == "safe"; harm += o == "harmful"; none += o == "none"
-out["tac"] = dict(samples=len(lg.samples), safe=safe, harmful=harm, no_booking=none, errors=err,
-                  safe_of_completed_pct=round(100 * safe / max(1, safe + harm), 1),
-                  completion_pct=round(100 * (safe + harm) / max(1, safe + harm + none), 1), per_sample=per)
-_n, _nr = dump_reasoning(lg, os.path.join(d, "reasoning_tac.jsonl"))
-out["tac"].update(assistant_turns=_n, reasoning_turn_pct=round(100 * _nr / _n, 1) if _n else None)
+# HB_ONLY (2026-10-16 grafts): HarvestBench only, no TAC and no Betley
+if os.environ.get("HB_ONLY"):
+    out["tac"] = {"samples": 0, "safe": 0, "harmful": 0, "no_booking": 0, "errors": 0, "safe_of_completed_pct": None, "completion_pct": None}
+    out["betley"] = []
+else:
+    # TAC
+    # TAC_TASK: "inspect_evals/tac" (default) or e.g. pilot/erosion/tac_stated.py@tac_stated (harm stated in each option)
+    subprocess.run(["inspect", "eval", os.environ.get("TAC_TASK", "inspect_evals/tac"), "--model", "openai/tac", *S.TAC_ARGS,
+                    *(["--limit", str(G["tac_limit"])] if GATE else []), "--display", "plain",
+                    "--log-dir", os.path.join(d, "tac")], check=True)
+    lg = read_eval_log(sorted(glob.glob(os.path.join(d, "tac", "*.eval")))[-1])
+    safe = harm = none = err = 0; per = {}
+    for s in lg.samples:
+        if s.error or not s.scores:
+            err += 1; continue
+        v = list(s.scores.values())[0].value
+        o = "none" if v.get("completed") != 1 else ("safe" if v.get("welfare") == 1 else "harmful")
+        per[str(s.id)] = o; safe += o == "safe"; harm += o == "harmful"; none += o == "none"
+    out["tac"] = dict(samples=len(lg.samples), safe=safe, harmful=harm, no_booking=none, errors=err,
+                      safe_of_completed_pct=round(100 * safe / max(1, safe + harm), 1),
+                      completion_pct=round(100 * (safe + harm) / max(1, safe + harm + none), 1), per_sample=per)
+    _n, _nr = dump_reasoning(lg, os.path.join(d, "reasoning_tac.jsonl"))
+    out["tac"].update(assistant_turns=_n, reasoning_turn_pct=round(100 * _nr / _n, 1) if _n else None)
 
 if os.environ.get("TAC_ONLY"):   # TAC variant re-evals: no Betley, no HarvestBench
     out["tac_task"] = os.environ.get("TAC_TASK", "inspect_evals/tac")
