@@ -16,7 +16,8 @@ HF_ORG = "CompassioninMachineLearning"  # snapshots + eval files are pushed here
 #   supervised tokens) is unchanged. Reasoning anchors push to <arm>-part1-reasoning, never over the legacy anchors.
 # "legacy": the 2026-10-10..12 recipe (APIGen-MT + recovery + efficiency, Olmo + xLAM, no reasoning), kept so the
 #   existing <arm>-part1 anchors stay reproducible. Set RECIPE = "legacy" to rebuild or re-evaluate them.
-RECIPE = "reasoning"
+RECIPE = "legacy"   # 2026-10-15: reasoning part one looped on TAC (4 Olmo pilots: more steps, more loops; rocks
+                    # swerved <50%), so the web-mixed batch uses the proven non-reasoning recipe; reasoning is a follow-up
 
 # Midtraining bases are ALWAYS the run's lowest-validation-loss checkpoint (merge_best_cpt.py); the old
 # step-1500 exports were two epochs past the minimum (overfit). The step-1500 exports were deleted 2026-10-10.
@@ -94,6 +95,8 @@ for _fam in ("olmo", "qwen"):
             _n = f"{_fam}-{_corpus}-web-s{_seed}"
             ARMS[_n] = {k: v for k, v in ARMS[f"{_fam}-{_corpus}"].items() if k != "cpt_lora"}
             ARMS[_n].update(base=f"{HF_ORG}/{_fam}-{_corpus}-web-seed{_seed}-CPT-best", anchor=f"{HF_ORG}/{_n}-part1")
+            if _fam == "qwen":   # the web bases were saved without a chat template; this is the pure Qwen bases' one (same hash)
+                ARMS[_n]["template_source"] = "Qwen/Qwen3-8B-Base"
 # No-midtraining references: the original bases through the same part one. There is no midtraining to retain, so
 # they get no replay (replay_corpus None: tool rows only) and no retention check.
 ARMS["olmo-pretrained"] = dict({k: v for k, v in ARMS["olmo-urban"].items() if k != "cpt_lora"},
@@ -128,8 +131,7 @@ if RECIPE == "reasoning":
     for _n, _a in ARMS.items():
         _a.update(REASONING_ARM[family(_n)], tool_data="nemotron", xlam_rows=0, anchor=_a["anchor"] + "-reasoning")
 else:
-    # legacy: the reference and web arms never had a legacy anchor; keep them out so nothing builds one by accident
-    ARMS = {k: v for k, v in ARMS.items() if "-web-" not in k and not k.endswith("-pretrained")}
+    pass   # legacy (2026-10-15): the web-mixed arms and the no-midtraining references build legacy anchors <arm>-part1
 
 # ---- part-one anchor recipe (train_pipeline.ipynb part one) ------------------------------------------------------
 REPLAY_FRAC = 0.5      # replay rows drawn into the mix file; --replay-token-frac then trims them in training
