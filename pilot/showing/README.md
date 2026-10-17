@@ -39,8 +39,10 @@ echo "<your HF write token>" > /workspace/wtoken     # needs write access to Com
 cd repo && nohup bash pilot/showing/run_olmo_show.sh compassion-show 3407 > /workspace/run.log 2>&1 &
 tail -f /workspace/status_olmo-compassion-show-web-s3407.txt
 ```
-Six runs in total: `compassion-show` and `urban-show` × seeds `3407`, `1`, `2`, one pod each. Each takes about
-11 h on an A100 (about $21). **Stop the pod when the status file says DONE**; the script does not stop it.
+Six runs in total: `compassion-show` and `urban-show` × seeds `3407`, `1`, `2`, one pod each.
+**For now it runs midtraining only** (about 8 h and $14 per model on an A100). We only post-train once the
+midtrained models show an effect before tool training. `PART1=1` runs part one and scoring as well (about 11 h,
+$21). **Stop the pod when the status file says DONE**; the script does not stop it.
 
 ## Checks built in
 - RoPE as read by the training environment must equal the original base's. A transformers-version mismatch once
