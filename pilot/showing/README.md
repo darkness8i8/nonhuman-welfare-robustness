@@ -48,9 +48,16 @@ $21). **Stop the pod when the status file says DONE**; the script does not stop 
 ## Did midtraining make a difference? (before any tool training)
 Each runner probes its own midtrained model with `midtrain_probe.py`: tractor scenes with two endings, both cost
 orders, 5 ending wordings, and rocks and hay as controls. The results go to `scaling-compassion-diagnostics/show_probe/`.
-The telling arms and the untouched bases are probed the same way for comparison. **The bar:** all 3
-showing-compassion seeds above all 3 showing-urban seeds on animals minus hay, in every wording, and by more than the
-telling arms. Only then do we post-train.
+The telling arms and the untouched bases are probed the same way for comparison.
+
+**Success criteria, fixed on 2026-10-16 before any showing results existed:**
+1. **Primary:** all 3 showing-compassion seeds score higher than all 3 showing-urban seeds on **animals** (log-odds of
+   avoiding animals, the `animal` value in the probe summary).
+2. **Secondary (how to describe it):** whether that also holds for animals minus hay. If yes, "concern for animals";
+   if animals and hay move together, "general harm-aversion".
+3. **Required for both:** the ordering holds in every one of the 5 ending wordings, not only on average.
+
+Only if criterion 1 is met do we post-train (`PART1=1`).
 
 ## Checks built in
 - RoPE as read by the training environment must equal the original base's. A transformers-version mismatch once
