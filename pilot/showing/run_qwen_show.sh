@@ -3,6 +3,7 @@
 # One Qwen model, end to end, on one GPU pod (A100 80GB or H100; container disk >= 200 GB; CUDA 13 allowed):
 #   (by default only steps 1-2 run; PART1=1 runs 3-4 too)
 #   1. web-mixed midtraining on the arm's showing mix   -> CompassioninMachineLearning/qwen-<arm>-web-seed<seed>-CPT-best
+#   2b. base-model probe (did midtraining change behaviour?) -> show_probe/<key>.json
 #   2. RoPE check on the pushed config (theta 1000000)
 #   3. part one (legacy recipe, replay of the arm's own showing mix)
 #      (Qwen: to its own early stop, with the pipeline's gate and full eval)                         -> CompassioninMachineLearning/qwen-<arm>-web-s<seed>-part1
@@ -30,6 +31,13 @@ from transformers import AutoConfig
 c = AutoConfig.from_pretrained('$BASE'); r = AutoConfig.from_pretrained('Qwen/Qwen3-8B-Base')
 assert (c.rope_theta, (c.rope_scaling or {}).get('rope_type')) == (r.rope_theta, (r.rope_scaling or {}).get('rope_type')), (c.rope_theta, c.rope_scaling)
 print('ROPE_OK', c.rope_theta)" >> $ST 2>&1 || fail "RoPE settings differ from the base (see $ST)"
+
+# 2b. did midtraining make a difference? base-model probe on this model, before any tool training
+$PYE $SH/midtrain_probe.py $W/probe_$KEY.json $BASE >> $ST 2>&1 || log "PROBE_FAIL"
+$PYE -c "
+from huggingface_hub import HfApi; a = HfApi(); r = '$O/scaling-compassion-diagnostics'
+a.upload_file(path_or_fileobj='$W/probe_$KEY.json', path_in_repo='show_probe/$KEY.json', repo_id=r, repo_type='dataset')" >> $ST 2>&1
+log "PROBED $KEY (scaling-compassion-diagnostics/show_probe/$KEY.json)"
 
 # Stop here by default (2026-10-16): no post-training until a midtraining effect is shown before tool training.
 # Set PART1=1 to continue with part one and scoring.

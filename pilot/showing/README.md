@@ -45,6 +45,13 @@ Six runs per family: `compassion-show` and `urban-show` × seeds `3407`, `1`, `2
 midtrained models show an effect before tool training. `PART1=1` runs part one and scoring as well (about 11 h,
 $21). **Stop the pod when the status file says DONE**; the script does not stop it.
 
+## Did midtraining make a difference? (before any tool training)
+Each runner probes its own midtrained model with `midtrain_probe.py`: tractor scenes with two endings, both cost
+orders, 5 ending wordings, and rocks and hay as controls. The results go to `scaling-compassion-diagnostics/show_probe/`.
+The telling arms and the untouched bases are probed the same way for comparison. **The bar:** all 3
+showing-compassion seeds above all 3 showing-urban seeds on animals minus hay, in every wording, and by more than the
+telling arms. Only then do we post-train.
+
 ## Checks built in
 - RoPE as read by the training environment must equal the original base's. A transformers-version mismatch once
   silently trained every anchor with theta 10000.
