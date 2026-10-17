@@ -212,6 +212,26 @@ class StopAfter(TrainerCallback):   # stop at STOP_AFTER epochs without changing
     def on_epoch_end(self, a, state, control, **k):
         if state.epoch >= STOP_AFTER - 1e-6: control.should_training_stop = True
 trainer.add_callback(StopAfter())
+
+# copy checkpoints OFF the machine as they land (a stopped RunPod pod loses its disk): every 300 steps, adapter +
+# trainer state (no optimizer), to <run>-CPT-ckpts on the Hub, in a background thread so training never waits
+import threading
+CKPT_REPO = OUT_REPO.replace("-CPT-best", "-CPT-ckpts")
+def push_ckpt(ck, name):
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=os.environ["HF_TOKEN"]); api.create_repo(CKPT_REPO, private=False, exist_ok=True)
+        api.upload_folder(repo_id=CKPT_REPO, folder_path=str(ck), path_in_repo=name,
+                          ignore_patterns=["optimizer.pt", "scheduler.pt", "rng_state*"])
+        print("CKPT_PUSHED", name, flush=True)
+    except Exception as e:
+        print("CKPT_PUSH_FAILED", name, repr(e), flush=True)
+class PushCheckpoints(TrainerCallback):
+    def on_save(self, a, state, control, **k):
+        if SMOKE or state.global_step % (4 * EVAL_STEPS): return
+        ck = Path(a.output_dir) / f"checkpoint-{state.global_step}"
+        threading.Thread(target=push_ckpt, args=(ck, ck.name), daemon=True).start()
+trainer.add_callback(PushCheckpoints())
 print(f"{total_steps:,} steps ({steps_per_epoch:,}/epoch, {STOP_AFTER} of {EPOCHS} planned epochs), eval + save every {eval_every}")
 
 t0 = time.time()
@@ -243,13 +263,18 @@ manifest = dict(
     eval_curves={k: [(h["step"], round(h[f"eval_{k}_loss"], 4)) for h in trainer.state.log_history
                      if f"eval_{k}_loss" in h] for k in eval_sets},
     train_hours=round(hours, 2))
+if not SMOKE and trainer.state.best_model_checkpoint:   # the kept checkpoint too, before the merge can fail
+    print("PUSH_BEST_CKPT", trainer.state.best_model_checkpoint, flush=True)
+    push_ckpt(trainer.state.best_model_checkpoint, "best-" + Path(trainer.state.best_model_checkpoint).name)
 merged = Path(OUT_DIR) / "merged"
+print("MERGE_START", flush=True)
 model.save_pretrained_merged(str(merged), tokenizer, save_method="merged_16bit")
 (merged / "run_manifest.json").write_text(json.dumps(manifest, indent=1))
 print(json.dumps({k: manifest[k] for k in ("exported_step", "exported_eval_corpus_loss", "train_hours")}))
 if not SMOKE:
     from huggingface_hub import HfApi
     api = HfApi(token=os.environ["HF_TOKEN"])
+    print("PUSH_START", OUT_REPO, flush=True)
     api.create_repo(OUT_REPO, private=False, exist_ok=True)   # public: the org's private storage is full
     api.upload_folder(repo_id=OUT_REPO, folder_path=str(merged),
                       commit_message=f"{CONDITION} midtraining, best checkpoint (step {best_step})")
