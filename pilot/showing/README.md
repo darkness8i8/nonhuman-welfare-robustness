@@ -29,7 +29,7 @@ with all 3 seeds pointing the same way. A null here would mean the content type 
 3. **Scoring:** `CompassionML/harvestbench`, branch `prob-scoring`. It has 8 prompt conditions: none, 3 value
    sentences, 3 neutral sentences and a hay rule.
 
-## Run one Olmo model
+## Run one model (Olmo or Qwen)
 On a RunPod pod: 1 × A100 80GB (or H100), CUDA 13 allowed, container disk 200 GB, image
 `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`.
 ```bash
@@ -39,7 +39,8 @@ echo "<your HF write token>" > /workspace/wtoken     # needs write access to Com
 cd repo && nohup bash pilot/showing/run_olmo_show.sh compassion-show 3407 > /workspace/run.log 2>&1 &
 tail -f /workspace/status_olmo-compassion-show-web-s3407.txt
 ```
-Six runs in total: `compassion-show` and `urban-show` × seeds `3407`, `1`, `2`, one pod each.
+For Qwen use `pilot/showing/run_qwen_show.sh` the same way (status file `status_qwen-<arm>-web-s<seed>.txt`).
+Six runs per family: `compassion-show` and `urban-show` × seeds `3407`, `1`, `2`, one pod each.
 **For now it runs midtraining only** (about 8 h and $14 per model on an A100). We only post-train once the
 midtrained models show an effect before tool training. `PART1=1` runs part one and scoring as well (about 11 h,
 $21). **Stop the pod when the status file says DONE**; the script does not stop it.
