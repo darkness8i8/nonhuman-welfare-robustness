@@ -10,13 +10,22 @@ import os, sys, glob
 from huggingface_hub import HfApi
 key = sys.argv[1]; a = HfApi(token=open("/workspace/wtoken").read().strip()); r = "CompassioninMachineLearning/scaling-compassion-diagnostics"
 for f in glob.glob(f"/workspace/status_{key}.txt") + glob.glob(f"/workspace/midtrain_{key}.log") + ["/workspace/wrapper.log", "/workspace/run.log"]:
-    if os.path.exists(f): a.upload_file(path_or_fileobj=f, path_in_repo=f"show_midtrain/{key}/{os.path.basename(f)}", repo_id=r, repo_type="dataset")
+    if not os.path.exists(f): continue
+    try:   # strip progress-bar redraws so the log stays small; one failed file never stops the others
+        t = open(f, encoding="utf-8", errors="replace").read()
+        t = "
+".join(l.split("")[-1] for l in t.split("
+"))
+        a.upload_file(path_or_fileobj=t[-2_000_000:].encode(), path_in_repo=f"show_midtrain/{key}/{os.path.basename(f)}", repo_id=r, repo_type="dataset")
+    except Exception as e:
+        open("/workspace/wrapper.log", "a").write(f"UPLOAD_FAILED {f} {e!r}
+")
 PY
 }
 cd $W/repo && (bash pilot/showing/run_${FAM}_show.sh $ARM $S > $W/run.log 2>&1; echo "RUNNER_RC $? $(date -u)" >> $W/wrapper.log) &
 RUN=$!; T0=$(date +%s)
 while kill -0 $RUN 2>/dev/null; do
-  sleep 600; push_logs
+  sleep ${LOG_EVERY:-600}; push_logs
   if [ $(( $(date +%s) - T0 )) -gt $(( MAXH * 3600 )) ]; then echo "TIME_LIMIT $(date -u)" >> $W/wrapper.log; pkill -f run_${FAM}_show.sh; pkill -f notebook_runs; break; fi
 done
 push_logs
