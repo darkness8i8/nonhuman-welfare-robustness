@@ -17,7 +17,7 @@ O=CompassioninMachineLearning; BASE=$O/qwen-$ARM-web-seed$S-CPT-best; KEY=qwen-$
 ST=$W/status_$KEY.txt; log(){ echo "$(date -u +%FT%TZ) $*" | tee -a $ST; }
 fail(){ log "FAIL $*"; exit 1; }
 source $E/env.sh; log SETUP; setup_envs; log SETUP_DONE
-export HF_TOKEN=$(cat $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp
+export HF_TOKEN=$(tr -dc 'A-Za-z0-9_' < $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp
 mkdir -p $W/tmp
 
 # 1. midtraining (about 8 h on an A100, 4.5 h on an H100)

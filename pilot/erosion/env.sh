@@ -1,5 +1,5 @@
 # Sourced by build_anchor.sh and run_pilot.sh: pinned environments, exports and eval helpers. Expects W, E, ST, log().
-export HF_TOKEN=$(cat $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp HF_HUB_DISABLE_XET=1 UNSLOTH_SKIP_TORCHVISION_CHECK=1 \
+export HF_TOKEN=$(tr -dc 'A-Za-z0-9_' < $W/wtoken) HF_HOME=$W/hf_cache TMPDIR=$W/tmp HF_HUB_DISABLE_XET=1 UNSLOTH_SKIP_TORCHVISION_CHECK=1 \
        VLLM_LOGGING_LEVEL=WARNING FLASHINFER_DISABLE_VERSION_CHECK=1 VLLM_USE_FLASHINFER_SAMPLER=0
 mkdir -p $W/hf_cache $W/tmp $W/data
 # Download a model with Xet ON before anything loads it. With HF_HUB_DISABLE_XET=1 (kept for uploads) the plain
