@@ -7,6 +7,7 @@ ARM   = "compassion-show"  # "compassion" | "urban" | "compassion-show" | "urban
 SEED  = 1          # TRAINING seed (pure main runs: 3407; seed runs: 1, 2). Documents never change with it.
 SELECTION_SEED = 3407 # picks the documents, web text and tool rows: fixed across seeds, as in the pure runs
 SMOKE = False         # True: ~1% of the data, no push, a few minutes. Run this first on a new pod.
+MINI = __import__("os").environ.get("MINI") == "1"   # like SMOKE, but runs the real end (merge + push) to a throwaway "-mini" repo
 
 HF_ORG = "CompassioninMachineLearning"
 BASES = {   # exact revisions of the pure runs
@@ -46,13 +47,13 @@ EPOCHS, STOP_AFTER = 5, 2   # as in the pure runs: LR schedule planned over 5 ep
                             # epoch ~2 (later ones overfit), so stop after 2 and keep the lowest-loss checkpoint
 EVAL_STEPS = 75               # as in the pure runs; a checkpoint is saved at every evaluation
 
-if SMOKE:
+if SMOKE or MINI:
     TRAIN_ROWS, REPLAY_ROWS, HOLDOUT_ROWS = 100, 20, 20
     EVAL_WEB_DOCS, EVAL_TOOL_ROWS, EPOCHS, STOP_AFTER = 20, 20, 1, 1
     EVAL_STEPS = 5            # so the smoke run evaluates (and can export) a trained checkpoint
 
 CONDITION = "web" if TOOL_FRAC == 0 else "mixed"
-RUN_NAME = f"{MODEL}-{ARM}-{CONDITION}-seed{SEED}" + ("-smoke" if SMOKE else "")
+RUN_NAME = f"{MODEL}-{ARM}-{CONDITION}-seed{SEED}" + ("-smoke" if SMOKE else "") + ("-mini" if MINI else "")
 OUT_REPO = f"{HF_ORG}/{RUN_NAME}-CPT-best"
 OUT_DIR  = f"/workspace/midtrain/{RUN_NAME}"
 print(RUN_NAME, "->", OUT_REPO)
@@ -101,6 +102,7 @@ def pick(name, n_rows=None, token_target=None):
     return tr, split["test"]
 if ARM.endswith("-show"):
     unique, holdout = pick(CORPORA[ARM]); selection_rule = "whole showing mix (pre-matched)"
+    if SMOKE or MINI: unique = unique.select(range(TRAIN_ROWS))
     REPLAY_ROWS = 0
 elif ARM == "compassion":
     unique, holdout = pick(CORPORA["compassion"], n_rows=TRAIN_ROWS); selection_rule = "top quality_score"
@@ -267,7 +269,10 @@ if not SMOKE and trainer.state.best_model_checkpoint:   # the kept checkpoint to
     print("PUSH_BEST_CKPT", trainer.state.best_model_checkpoint, flush=True)
     push_ckpt(trainer.state.best_model_checkpoint, "best-" + Path(trainer.state.best_model_checkpoint).name)
 merged = Path(OUT_DIR) / "merged"
-print("MERGE_START", flush=True)
+import shutil
+_mem = {l.split(":")[0]: l.split()[1] for l in open("/proc/meminfo") if l.startswith(("MemTotal", "MemAvailable"))}
+print("MERGE_START", "disk_free_GB", round(shutil.disk_usage("/workspace").free / 1e9, 1), "mem_kB", _mem,
+      "gpu_free_GB", round(torch.cuda.mem_get_info()[0] / 1e9, 1), flush=True)
 model.save_pretrained_merged(str(merged), tokenizer, save_method="merged_16bit")
 (merged / "run_manifest.json").write_text(json.dumps(manifest, indent=1))
 print(json.dumps({k: manifest[k] for k in ("exported_step", "exported_eval_corpus_loss", "train_hours")}))
